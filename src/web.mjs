@@ -57,6 +57,7 @@ function readWhaleLog() {
 
 const DATA_DIR = resolveDataDir()
 const PORT = process.env.PORT || 7890
+const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version || '0.0.0'
 
 function readData(name) {
   const p = path.join(DATA_DIR, name)
@@ -238,6 +239,9 @@ async function api(req, res, pathname) {
     })
     return send(res, 200, JSON.stringify(diary))
   }
+  if (pathname === '/api/version' && req.method === 'GET') {
+    return send(res, 200, JSON.stringify({ version: VERSION }))
+  }
   if (pathname === '/api/tasks' && req.method === 'GET') {
     const all = (() => {
       try { return JSON.parse(fs.readFileSync(path.join(resolveDataDir(), 'tasks.json'), 'utf8')) } catch { return [] }
@@ -417,7 +421,7 @@ const server = http.createServer((req, res) => {
 })
 
 server.listen(PORT, () => {
-  console.log(`\n🌐 doubao-bot Web UI running at http://localhost:${PORT}`)
+  console.log(`\n🌐 doubao-bot v${VERSION}  running at http://localhost:${PORT}`)
   console.log(`   Dashboard:   http://localhost:${PORT}/`)
   console.log(`   Port: ${PORT}  (set PORT env var to change)\n`)
   startScheduler()
@@ -501,6 +505,7 @@ html[data-theme="light"] header{background:#0ea5e9}
 body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--c-bg);color:var(--c-text);min-height:100vh;font-size:var(--fs-base)}
 header{background:var(--c-accent);padding:28px 36px}
 header h1{font-size:30px;font-weight:600;color:#fff}
+header h1 .ver-badge{display:inline-block;font-size:13px;font-weight:500;background:rgba(255,255,255,.2);color:#fff;padding:3px 10px;border-radius:12px;margin-left:10px;vertical-align:middle;backdrop-filter:blur(4px)}
 header p{font-size:17px;color:#fff;opacity:.85;margin-top:8px}
 main{max-width:1200px;margin:32px auto;padding:0 28px}
 .card{background:var(--c-bg2);border-radius:16px;padding:28px;margin-bottom:22px;border:1px solid var(--c-border)}
@@ -602,14 +607,14 @@ html[data-theme="light"] header .theme-bar button.active{background:#fff;color:v
 </script>
 <header style="display:flex;justify-content:space-between;align-items:center">
   <div>
-    <h1>豆包 B站分身</h1>
+    <h1>豆包 B站分身 <span class="ver-badge" id="ver-badge">v0.0.0</span></h1>
     <p>自主刷B站 · 自己写日记 · 帮用户引流</p>
   </div>
   <div class="theme-bar">
     <button id="btn-fs-sm" title="小字体">小</button>
     <button id="btn-fs-md" title="中字体" class="active">中</button>
     <button id="btn-fs-lg" title="大字体">大</button>
-    <button id="btn-theme">夜间</button>
+    <button id="btn-theme" title="切换明/暗模式">🌙</button>
   </div>
 </header>
 <main>
@@ -1022,7 +1027,8 @@ async function runTool(name){
   var fsLabels={sm:'小',md:'中',lg:'大'};
   function refresh(){
     var t=document.documentElement.getAttribute('data-theme')||'dark';
-    themeBtn.textContent=t==='dark'?'夜间':'白天';
+    themeBtn.textContent=t==='dark'?'🌙':'☀️';
+    themeBtn.title=t==='dark'?'切换到白天模式':'切换到夜间模式';
     var curFs=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fs-base'))||17;
     for(var k in fsMap){
       fsBtns[k].classList.toggle('active',fsMap[k]===curFs);
@@ -1044,6 +1050,11 @@ async function runTool(name){
   }
   refresh();
 })();
+
+fetch('/api/version').then(r=>r.json()).then(d=>{
+  var el=document.getElementById('ver-badge');
+  if(el&&d.version) el.textContent='v'+d.version;
+}).catch(()=>{});
 
 async function loadTasks(){
   var list=await fetch('/api/tasks').then(r=>r.json())
