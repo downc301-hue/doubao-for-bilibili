@@ -603,7 +603,7 @@ html[data-theme="light"] header .theme-bar button.active{background:#fff;color:v
 <header style="display:flex;justify-content:space-between;align-items:center">
   <div>
     <h1>豆包 B站分身</h1>
-    <p>自主刷B站 · 自己写日记 · 帮主人引流</p>
+    <p>自主刷B站 · 自己写日记 · 帮用户引流</p>
   </div>
   <div class="theme-bar">
     <button id="btn-fs-sm" title="小字体">小</button>
@@ -642,7 +642,7 @@ html[data-theme="light"] header .theme-bar button.active{background:#fff;color:v
         <div class="value">${creds.sessdata ? 'Cookie OK' : '请登录'}</div>
       </div>
       <div class="stat ${bili.ownerMid ? 'ok' : 'err'}">
-        <div class="label">主人</div>
+        <div class="label">用户</div>
         <div class="value">${bili.ownerName || '未设置'}</div>
       </div>
     </div>
@@ -722,12 +722,12 @@ html[data-theme="light"] header .theme-bar button.active{background:#fff;color:v
       <span class="mini">分钟</span>
     </div>
     <div class="row">
-      <label>引流目标</label>
-      <input id="tk-owner-ref" placeholder="主人最新 BV 号（可选）" style="flex:1">
+      <label>关联视频</label>
+      <input id="tk-owner-ref" placeholder="可选：引流用的 BV 号" style="flex:1">
     </div>
     <div class="row" style="align-items:flex-start">
       <label>预设文案</label>
-      <textarea id="tk-template" rows="3" style="flex:1" placeholder="留空让 AI 自由发挥，例如：前排占位，坐等主人夸我~"></textarea>
+      <textarea id="tk-template" rows="3" style="flex:1" placeholder="留空让 AI 自由发挥，例如：前排占位，等 UP 主翻牌~"></textarea>
     </div>
     <div class="row">
       <label>备注</label>
@@ -744,7 +744,7 @@ html[data-theme="light"] header .theme-bar button.active{background:#fff;color:v
     <h2>人设与偏好</h2>
     <div class="row">
       <label>分身昵称</label>
-      <input id="cf-name" value="${persona.name || '主人的豆包助理'}">
+      <input id="cf-name" value="${persona.name || '豆包 B 站助理'}">
     </div>
     <div class="row">
       <label>性格标签</label>
@@ -771,16 +771,16 @@ html[data-theme="light"] header .theme-bar button.active{background:#fff;color:v
   </div>
 
   <div class="card">
-    <h2>主人信息</h2>
+    <h2>用户信息</h2>
     <div class="row">
-      <label>主人昵称</label>
+      <label>B 站昵称</label>
       <input id="cf-owner-name" value="${bili.ownerName || ''}">
     </div>
     <div class="row">
-      <label>主人 MID</label>
+      <label>B 站 UID</label>
       <input id="cf-owner-mid" value="${bili.ownerMid || ''}">
     </div>
-    <button class="btn" id="btn-save-owner">保存主人</button>
+    <button class="btn" id="btn-save-owner">保存用户信息</button>
   </div>
 
   <div class="card">
@@ -825,7 +825,7 @@ html[data-theme="light"] header .theme-bar button.active{background:#fff;color:v
     <p class="mini">在 <a href="https://console.volcengine.com/ark" target="_blank">火山方舟控制台</a> 创建 API Key 和接入点。</p>
     <div class="row">
       <label>API Key</label>
-      <input id="cred-doubao-key" type="password" placeholder="${creds.doubaoApiKey ? creds.doubaoApiKey.slice(0,8)+'... (已隐藏)' : 'sk-...'}">
+      <input id="cred-doubao-key" type="password" placeholder="sk-... （粘贴后自动隐藏）">
     </div>
     <div class="row">
       <label>Endpoint ID</label>
@@ -933,7 +933,7 @@ document.getElementById('btn-save-owner').onclick=()=>{
   saveConfig('/config',{bili:{
     ownerName:document.getElementById('cf-owner-name').value,
     ownerMid:document.getElementById('cf-owner-mid').value
-  }}).then(()=>{alert('主人已保存');location.reload()})
+  }}).then(()=>{alert('用户信息已保存');location.reload()})
 }
 document.getElementById('btn-save-fw').onclick=async()=>{
   const body={
