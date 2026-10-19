@@ -1,11 +1,26 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { spawn } from 'node:child_process'
 
-const credFile = path.join(os.homedir(), '.bili-ai', 'credentials.json')
-const cred = JSON.parse(fs.readFileSync(credFile, 'utf8'))
+process.on('unhandledRejection', (err) => { console.error('[ERR] unhandledRejection:', err?.message || err) })
+process.on('uncaughtException', (err) => { console.error('[ERR] uncaughtException:', err?.message || err) })
+
+const DATA_DIR = path.join(os.homedir(), '.doubao-bot')
+const CRED_FILE = path.join(DATA_DIR, 'credentials.json')
+const MAIN_CFG = path.join(DATA_DIR, 'config.json')
+const cred = JSON.parse(fs.readFileSync(CRED_FILE, 'utf8'))
+const mainCfg = JSON.parse(fs.readFileSync(MAIN_CFG, 'utf8'))
+
+const OWNER_MID = String(mainCfg.bili?.ownerMid || '')
+const OWNER_NAME = mainCfg.bili?.ownerName || 'owner'
+const SELF_MID = String(mainCfg.bili?.selfMid || '')
+
+const sessdata = decodeURIComponent(cred.sessdata || '')
+const bili_jct = cred.bili_jct || cred.biliJct || ''
+const buvid3 = cred.buvid3 || ''
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-const cookieHeader = `SESSDATA=${cred.sessdata}; bili_jct=${cred.bili_jct}; buvid3=${cred.buvid3}`
+const cookieHeader = `SESSDATA=${sessdata}; bili_jct=${bili_jct}; buvid3=${buvid3}`
 const H = { 'user-agent': UA, referer: 'https://space.bilibili.com/', cookie: cookieHeader }
 
 const args = process.argv.slice(2)
@@ -16,8 +31,8 @@ const get = (k, d) => {
 const INTERVAL = Math.max(180, Number(get('interval', '300')))
 const QUIET = args.includes('--quiet')
 const ONLY_WHITELIST = args.includes('--only-whitelist')
+const DRY_RUN = args.includes('--dry')
 
-const DATA_DIR = path.join(os.homedir(), '.doubao-bot')
 const PROCESSED_FILE = path.join(DATA_DIR, 'follow-processed.json')
 const CONFIG_FILE = path.join(DATA_DIR, 'follow-config.json')
 
@@ -33,16 +48,100 @@ const processed = new Set(readJson(PROCESSED_FILE, []))
 const config = readJson(CONFIG_FILE, {})
 const whitelist = new Set((config.whitelist || []).map(String))
 const blacklist = new Set((config.blacklist || []).map(String))
-const templates = (config.templates || ['前排占个座~', '沙发！支持UP主', '第一！来啦来啦', '抢个前排~']).filter(Boolean)
 const minAgeSec = Number(config.minAgeSec || 0)
+
+const KEYWORD_TEMPLATES = [
+  { keywords: ['AI', '人工智能', 'AGI', '大模型', 'LLM', 'Claude', 'GPT', '豆包'],
+    templates: [
+      `AI 这条线玩明白了！@${OWNER_NAME} 支持支持~`,
+      `AI 真的是 @${OWNER_NAME} 的主战场，赞了！`,
+      `工具收藏了，回头试试，@${OWNER_NAME} 出品必属精品`,
+    ] },
+  { keywords: ['猫咪', '猫', '喵', '橘猫', '英短', '布偶'],
+    templates: [
+      `可爱死了~ @${OWNER_NAME} 家的宝贝`,
+      `哈哈哈哈笑死，@${OWNER_NAME} 快来看这只小活宝`,
+      `吸一口，@${OWNER_NAME} 你家猫也这么调皮吗？`,
+    ] },
+  { keywords: ['鬼畜', 'remix', '恶搞', '整活', '二创'],
+    templates: [
+      `哈哈哈哈哈哈 @${OWNER_NAME} 快来看这个整活`,
+      `好活！@${OWNER_NAME} 这种二创才是灵魂`,
+      `笑不活了，@${OWNER_NAME} 有没有被辣到？`,
+    ] },
+  { keywords: ['Live2D', '模型', '皮套', 'VTuber'],
+    templates: [
+      `模型好可爱~ @${OWNER_NAME} 也做过 Live2D 吗？`,
+      `支持！@${OWNER_NAME} 也来整一个？`,
+    ] },
+  { keywords: ['游戏', '原神', '星穹铁道', '黑神话', '只狼'],
+    templates: [
+      `@${OWNER_NAME} 也玩这个？回头一起组队`,
+      `好游戏！@${OWNER_NAME} 你打通了？`,
+    ] },
+  { keywords: ['教程', '教学', '入门', '实战', '从零'],
+    templates: [
+      `教程码住了！@${OWNER_NAME} 也在做这类内容`,
+      `干货满满~ @${OWNER_NAME} 这种视频才有含金量`,
+    ] },
+]
+
+const FALLBACK_TEMPLATES = (config.templates || [
+  `前排占个座~ @${OWNER_NAME}`,
+  `沙发！@${OWNER_NAME} 出品必属精品`,
+  `第一！来啦来啦 @${OWNER_NAME}`,
+  `抢个前排~ 支持@${OWNER_NAME}`,
+]).filter(Boolean)
+
+function matchKeywords(title) {
+  if (!title) return null
+  const lower = title.toLowerCase()
+  for (const { keywords, templates } of KEYWORD_TEMPLATES) {
+    for (const kw of keywords) {
+      if (lower.includes(kw.toLowerCase())) {
+        return templates[Math.floor(Math.random() * templates.length)]
+      }
+    }
+  }
+  return null
+}
+
+function pickFallbackTemplate() {
+  if (FALLBACK_TEMPLATES.length === 0) return `前排占个座~ @${OWNER_NAME}`
+  return FALLBACK_TEMPLATES[Math.floor(Math.random() * FALLBACK_TEMPLATES.length)]
+}
+
+async function runArchiveActions(video) {
+  const flag = DRY_RUN ? '--dry' : '--go'
+  const scriptsDir = path.join(process.cwd(), 'tools', 'commands')
+  const runTool = (name) => new Promise((resolve) => {
+    const proc = spawn(process.execPath, [path.join(scriptsDir, name + '.mjs'), '--aid', String(video.aid), '--bvid', video.bvid, flag], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: process.cwd(),
+    })
+    let out = ''
+    proc.stdout.on('data', d => { out += d.toString(); process.stdout.write(`   > ${d}`) })
+    proc.stderr.on('data', d => process.stderr.write(`   > ERR ${d}`))
+    proc.on('close', (code) => resolve({ code, out }))
+  })
+
+  console.log(`   [archiver] B号三连 (like+fav+share, ${DRY_RUN ? 'DRY' : 'REAL'})`)
+
+  const rLike = await runTool('like-archive')
+  console.log(`   ${rLike.out.includes('成功') ? '[OK]' : rLike.out.includes('重复') ? '[SKIP]' : '[FAIL]'} like`)
+
+  const rFav = await runTool('fav')
+  console.log(`   ${rFav.out.includes('成功') ? '[OK]' : rFav.out.includes('默认') ? '[DIR]' : '[FAIL]'} fav`)
+
+  const rShare = await runTool('share')
+  console.log(`   ${rShare.out.includes('成功') || rShare.out.includes('已') ? '[OK]' : rShare.out.includes('重复') ? '[SKIP]' : '[FAIL]'} share`)
+
+  await new Promise(s => setTimeout(s, 1500))
+}
 
 const startedAt = Math.floor(Date.now() / 1000)
 
-async function fetchFeed() {
-  const r = await fetch('https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all?type=video&page=1&timezone_offset=-480&platform=web', { headers: H })
-  const j = await r.json()
-  if (j?.code !== 0) throw new Error(`code=${j?.code} ${j?.message ?? ''}`)
-  const items = j?.data?.items || []
+function parseFeedItems(items) {
   const out = []
   for (const it of items) {
     const a = it?.modules?.module_author
@@ -61,9 +160,45 @@ async function fetchFeed() {
   return out
 }
 
-function pickTemplate() {
-  if (templates.length === 0) return '前排占个座~'
-  return templates[Math.floor(Math.random() * templates.length)]
+async function fetchFeed() {
+  const r = await fetch('https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all?type=video&page=1&timezone_offset=-480&platform=web', { headers: H })
+  const j = await r.json()
+  if (j?.code !== 0) throw new Error(`code=${j?.code} ${j?.message ?? ''}`)
+  return parseFeedItems(j?.data?.items || [])
+}
+
+async function fetchOwnerFeed() {
+  if (!OWNER_MID) return []
+  const r = await fetch(`https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all?host_mid=${OWNER_MID}&type=video&page=1&timezone_offset=-480&platform=web`, { headers: H })
+  const j = await r.json()
+  if (j?.code !== 0) throw new Error(`owner feed code=${j?.code} ${j?.message ?? ''}`)
+  return parseFeedItems(j?.data?.items || [])
+}
+
+function pickCommentMsg(title) {
+  const matched = matchKeywords(title)
+  if (matched) return { msg: matched, source: 'keyword' }
+  return { msg: pickFallbackTemplate(), source: 'fallback' }
+}
+
+function runCommentTask(msg, video) {
+  return new Promise((resolve) => {
+    const task = JSON.stringify({
+      name: `follow-new-${video.upName}`,
+      targetUrl: `https://www.bilibili.com/video/${video.bvid}`,
+      template: msg,
+      _source: 'follow-watch',
+      _upName: video.upName,
+    })
+    const proc = spawn(process.execPath, [path.join(process.cwd(), 'src', 'run-task-direct.mjs'), task], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: process.cwd(),
+    })
+    let out = ''
+    proc.stdout.on('data', d => { out += d.toString(); process.stdout.write(`   > ${d}`) })
+    proc.stderr.on('data', d => process.stderr.write(`   > ERR ${d}`))
+    proc.on('close', () => resolve(out))
+  })
 }
 
 function ageCheck(pubTs) {
@@ -86,22 +221,37 @@ function saveProcessed() {
   writeJson(PROCESSED_FILE, [...processed].slice(-2000))
 }
 
-console.log(`\n🎬 === 关注列表守望启动 ===`)
-console.log(`   每 ${INTERVAL} 秒扫一次关注列表`)
-console.log(`   白名单 ${whitelist.size} 个 / 黑名单 ${blacklist.size} 个 / 模板 ${templates.length} 条`)
-console.log(`   已处理缓存: ${processed.size} 条（启动基线）`)
-if (ONLY_WHITELIST) console.log(`   ⚠️  仅响应白名单 UP 主`)
-if (minAgeSec > 0) console.log(`   ⚠️  只响应发布超过 ${minAgeSec} 秒的视频`)
-console.log(`   启动时间: ${new Date().toLocaleString('zh-CN', { hour12: false })}`)
+console.log(`\n=== follow-await start ===`)
+console.log(`   poll every ${INTERVAL}s`)
+console.log(`   owner A: ${OWNER_NAME} (mid ${OWNER_MID})`)
+console.log(`   bot B self mid: ${SELF_MID}`)
+console.log(`   keyword templates: ${KEYWORD_TEMPLATES.length} / fallback: ${FALLBACK_TEMPLATES.length}`)
+console.log(`   whitelist: ${whitelist.size} / blacklist: ${blacklist.size}`)
+console.log(`   processed baseline: ${processed.size}`)
+if (OWNER_MID) console.log(`   [A-new] -> B like+fav+share+keyword-comment`)
+if (ONLY_WHITELIST) console.log(`   WARN: whitelist-only mode`)
+if (minAgeSec > 0) console.log(`   WARN: minAgeSec=${minAgeSec}`)
+if (DRY_RUN) console.log(`   WARN: DRY-RUN`)
+console.log(`   started: ${new Date().toLocaleString('zh-CN', { hour12: false })}`)
 
 let rounds = 0
-const { spawn } = await import('node:child_process')
 
 for (;;) {
   rounds++
   try {
-    const items = await fetchFeed()
-    const fresh = filterItems(items).sort((a, b) => b.pubTs - a.pubTs)
+    const feedItems = await fetchFeed().catch(e => { console.log(`  [${rounds}] feed err: ${e.message}`); return [] })
+    const ownerItems = await fetchOwnerFeed().catch(e => { console.log(`  [${rounds}] owner feed err: ${e.message}`); return [] })
+
+    const seenBvids = new Set()
+    const allItems = []
+    for (const x of (feedItems || [])) {
+      if (!seenBvids.has(x.bvid)) { seenBvids.add(x.bvid); allItems.push(x) }
+    }
+    for (const x of (ownerItems || [])) {
+      if (!seenBvids.has(x.bvid)) { seenBvids.add(x.bvid); allItems.push(x) }
+    }
+
+    const fresh = filterItems(allItems).sort((a, b) => b.pubTs - a.pubTs)
 
     if (fresh.length > 0) {
       for (const v of fresh) {
@@ -109,40 +259,33 @@ for (;;) {
         processed.add(v.bvid)
         saveProcessed()
 
-        const msg = pickTemplate()
-        console.log(`\n🔥 发现新视频: ${v.upName} | ${v.title.slice(0, 40)}`)
-        console.log(`   BV=${v.bvid}  aid=${v.aid}  发布: ${v.pubTs ? new Date(v.pubTs * 1000).toLocaleString('zh-CN', { hour12: false }) : '?'}  播放: ${v.play}`)
-        console.log(`   📝 评论: ${msg}`)
+        const isOwner = OWNER_MID && String(v.upMid) === OWNER_MID
+        const { msg, source } = pickCommentMsg(v.title)
 
-        const task = JSON.stringify({
-          name: `关注抢新-${v.upName}`,
-          targetUrl: `https://www.bilibili.com/video/${v.bvid}`,
-          template: msg,
-          _source: 'follow-watch',
-          _upName: v.upName,
-        })
+        const ownerTag = isOwner ? ' [OWNER]' : ''
+        console.log(`\n[NEW]${ownerTag} ${v.upName} | ${v.title.slice(0, 60)}`)
+        console.log(`   BV=${v.bvid} aid=${v.aid} play=${v.play} pub=${v.pubTs ? new Date(v.pubTs * 1000).toLocaleString('zh-CN', { hour12: false }) : '?'}`)
+        console.log(`   comment(${source}): ${msg}`)
 
-        const proc = spawn(process.execPath, [path.join(process.cwd(), 'src', 'run-task-direct.mjs'), task], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          cwd: process.cwd(),
-        })
-        let out = ''
-        proc.stdout.on('data', d => { out += d.toString(); process.stdout.write(`   → ${d}`) })
-        proc.stderr.on('data', d => process.stderr.write(`   → ERR ${d}`))
-        await new Promise(resolve => proc.on('close', () => resolve()))
+        if (isOwner) {
+          await runArchiveActions(v)
+          await new Promise(s => setTimeout(s, 2000))
+        }
 
-        if (out.includes('发送成功')) console.log(`   ✅ 已抢占前排`)
-        else console.log(`   ⚠️  可能失败，检查日志`)
+        const out = await runCommentTask(msg, v)
+        if (out.includes('发送成功')) console.log(`   [OK] 已抢占前排`)
+        else console.log(`   [WARN] 评论可能失败，检查日志`)
 
         await new Promise(s => setTimeout(s, 2000 + Math.random() * 3000))
       }
     } else if (!QUIET) {
-      const newestPub = items[0]?.pubTs || 0
+      const newestPub = allItems[0]?.pubTs || 0
       const timeStr = newestPub ? new Date(newestPub * 1000).toLocaleString('zh-CN', { hour12: false }) : '?'
-      console.log(`  [${rounds}] ${new Date().toLocaleTimeString('zh-CN', { hour12: false })} 无新投稿（最新 ${timeStr}，已处理 ${processed.size}）`)
+      const ownerCount = ownerItems?.length || 0
+      console.log(`  [${rounds}] ${new Date().toLocaleTimeString('zh-CN', { hour12: false })} no-new (latest=${timeStr}, ownerFeed=${ownerCount}, processed=${processed.size})`)
     }
   } catch (e) {
-    console.log(`  [${rounds}] 这一轮失败：${e.message}（继续守望）`)
+    console.log(`  [${rounds}] poll failed: ${e.message} (continue)`)
   }
 
   await new Promise(s => setTimeout(s, INTERVAL * 1000))

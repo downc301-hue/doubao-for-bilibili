@@ -251,13 +251,13 @@ async function api(req, res, pathname) {
     const enriched = all.map(t => {
       const st = state[t.id || t.name]
       const dowNames = ['周日','周一','周二','周三','周四','周五','周六']
-      const days = Array.isArray(t.day) ? t.day.map(d => dowNames[d] || d).join('/') : (typeof t.day==='number' ? dowNames[t.day] : '每天')
-      const nextRun = t.enabled === false ? null : (() => {
-        const d = new Date()
-        const triggerH = parseInt(t.time) - (t.leadMin || 0)
-        const triggerM = parseInt(t.time.split(':')[1] || '0') - (t.leadMin || 0)
-        return `${days} ${String(Math.floor(Math.max(0,triggerH)/60)).padStart(2,'0')+':'+String(Math.max(0,triggerH)%60).padStart(2,'0')}`
-      })()
+      const dayRaw = t.day
+      const days = Array.isArray(dayRaw) ? dayRaw.map(d => dowNames[d] || d).join('/') : (typeof dayRaw==='number' ? dowNames[dayRaw] : '每天')
+      const timeStr = t.time || '11:00'
+      const lead = t.leadMin || 0
+      const triggerH = parseInt(timeStr.split(':')[0] || '11') - Math.floor(lead / 60)
+      const triggerM = parseInt(timeStr.split(':')[1] || '0') - (lead % 60)
+      const nextRun = t.enabled === false ? null : `${days} ${String(Math.max(0,triggerH)).padStart(2,'0')}:${String(Math.max(0,triggerM)).padStart(2,'0')}`
       const done = st?.date === today
       return {
         ...t,
@@ -351,7 +351,147 @@ async function api(req, res, pathname) {
     return runTool(res, ['feed'])
   }
 
+  if (pathname === '/api/bili/self' && req.method === 'GET') {
+    return biliSelf(res)
+  }
+  if (pathname === '/api/bili/followings' && req.method === 'GET') {
+    const url = new URL('http://x' + req.url)
+    const pn = Number(url.searchParams.get('pn')) || 1
+    const ps = Math.min(50, Number(url.searchParams.get('ps')) || 20)
+    return biliFollowings(res, pn, ps)
+  }
+  if (pathname === '/api/bili/up' && req.method === 'GET') {
+    const url = new URL('http://x' + req.url)
+    const mid = Number(url.searchParams.get('mid'))
+    if (!mid) return send(res, 400, JSON.stringify({ error: 'mid required' }))
+    return biliUpInfo(res, mid)
+  }
+  if (pathname === '/api/bili/follow' && req.method === 'POST') {
+    const body = await parseBody(req)
+    const mid = Number(body.mid)
+    if (!mid) return send(res, 400, JSON.stringify({ error: 'mid required' }))
+    return biliModifyRelation(res, mid, 1)
+  }
+  if (pathname === '/api/bili/unfollow' && req.method === 'POST') {
+    const body = await parseBody(req)
+    const mid = Number(body.mid)
+    if (!mid) return send(res, 400, JSON.stringify({ error: 'mid required' }))
+    return biliModifyRelation(res, mid, 2)
+  }
+
   return send(res, 404, JSON.stringify({ error: 'not found' }))
+}
+
+function biliReqHeaders() {
+  const creds = getJson('credentials.json')
+  const sess = creds.sessdata
+  const jct = creds.bili_jct || creds.biliJct
+  const buvid = creds.buvid3
+  if (!sess || !jct) return null
+  return {
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    referer: 'https://space.bilibili.com/',
+    cookie: `SESSDATA=${sess}; bili_jct=${jct}; buvid3=${buvid}`,
+  }
+}
+
+async function biliSelf(res) {
+  const H = biliReqHeaders()
+  if (!H) return send(res, 401, JSON.stringify({ error: 'B 站 Cookie 未配置' }))
+  try {
+    const r = await fetch('https://api.bilibili.com/x/web-interface/nav', { headers: H })
+    const j = await r.json()
+    if (j?.code !== 0) return send(res, 200, JSON.stringify({ error: `code=${j?.code} ${j?.message || ''}` }))
+    const d = j.data
+    return send(res, 200, JSON.stringify({
+      mid: d.mid,
+      name: d.uname,
+      face: d.face,
+      level: d.level_info?.current_level || 0,
+      following: d.following || 0,
+      follower: d.follower || 0,
+      sign: d.sign || '',
+    }))
+  } catch (e) {
+    return send(res, 200, JSON.stringify({ error: String(e.message) }))
+  }
+}
+
+async function biliFollowings(res, pn, ps) {
+  const H = biliReqHeaders()
+  if (!H) return send(res, 401, JSON.stringify({ error: 'B 站 Cookie 未配置' }))
+  try {
+    const myR = await fetch('https://api.bilibili.com/x/web-interface/nav', { headers: H })
+    const myJ = await myR.json()
+    const myMid = myJ?.data?.mid
+    if (!myMid) return send(res, 200, JSON.stringify({ error: `无法获取自身 UID` }))
+
+    const r = await fetch(`https://api.bilibili.com/x/relation/followings?vmid=${myMid}&pn=${pn}&ps=${ps}&order=desc`, { headers: H })
+    const j = await r.json()
+    if (j?.code !== 0) return send(res, 200, JSON.stringify({ error: `code=${j?.code} ${j?.message || ''}` }))
+    const list = (j?.data?.list || []).map(u => ({
+      mid: u.mid,
+      name: u.uname,
+      face: u.face,
+      sign: u.sign || '',
+      official: u.official?.title || '',
+      fans: u.fans || 0,
+      live: u.live_status ? { status: u.live_status, title: u.live_title || '', cover: u.live_cover || '' } : null,
+    }))
+    return send(res, 200, JSON.stringify({
+      total: j?.data?.total || 0,
+      pn, ps,
+      list,
+    }))
+  } catch (e) {
+    return send(res, 200, JSON.stringify({ error: String(e.message) }))
+  }
+}
+
+async function biliUpInfo(res, mid) {
+  const H = biliReqHeaders()
+  if (!H) return send(res, 401, JSON.stringify({ error: 'B 站 Cookie 未配置' }))
+  try {
+    const r = await fetch(`https://api.bilibili.com/x/space/wbi/acc/info?mid=${mid}`, { headers: H })
+    const j = await r.json()
+    if (j?.code !== 0) return send(res, 200, JSON.stringify({ error: `code=${j?.code} ${j?.message || ''}` }))
+    const d = j.data
+    return send(res, 200, JSON.stringify({
+      mid: d.mid,
+      name: d.name,
+      face: d.face,
+      sign: d.sign || '',
+      official: d.official?.title || '',
+      level: d.level || 0,
+      follower: d.follower || 0,
+      following: d.following || 0,
+    }))
+  } catch (e) {
+    return send(res, 200, JSON.stringify({ error: String(e.message) }))
+  }
+}
+
+async function biliModifyRelation(res, fid, act) {
+  const creds = getJson('credentials.json')
+  const jct = creds.bili_jct || creds.biliJct
+  const sess = creds.sessdata
+  const buvid = creds.buvid3
+  if (!sess || !jct) return send(res, 401, JSON.stringify({ error: 'B 站 Cookie 未配置' }))
+  const H = {
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    referer: `https://space.bilibili.com/${fid}`,
+    cookie: `SESSDATA=${sess}; bili_jct=${jct}; buvid3=${buvid}`,
+    'Content-Type': 'application/x-www-form-urlencoded',
+  }
+  const body = `fid=${fid}&act=${act}&re_src=11&csrf=${jct}`
+  try {
+    const r = await fetch('https://api.bilibili.com/x/relation/modify', { method: 'POST', headers: H, body })
+    const j = await r.json()
+    if (j?.code !== 0) return send(res, 200, JSON.stringify({ ok: false, error: `code=${j?.code} ${j?.message || ''}` }))
+    return send(res, 200, JSON.stringify({ ok: true, action: act === 1 ? 'followed' : 'unfollowed', mid: fid }))
+  } catch (e) {
+    return send(res, 200, JSON.stringify({ ok: false, error: String(e.message) }))
+  }
 }
 
 function extractCookie(cookieStr, name) {
@@ -526,7 +666,8 @@ main{max-width:1200px;margin:32px auto;padding:0 28px}
 .btn:hover{transform:translateY(-1px);background:var(--c-accent-hover)}
 .btn:active{transform:translateY(0)}
 .btn.ghost{background:transparent;border:1px solid var(--c-accent);color:var(--c-accent)}
-.btn.danger{background:linear-gradient(135deg,#ff7a45,var(--c-err))}
+.btn.danger{background:linear-gradient(135deg,#ff7a45,var(--c-err));color:#fff;border:1px solid var(--c-err)}
+.btn.ghost.danger{background:linear-gradient(135deg,#ff7a45,var(--c-err));color:#fff;border:1px solid var(--c-err)}
 textarea,input,select{background:var(--c-bg3);border:1px solid var(--c-border2);border-radius:10px;color:var(--c-text);padding:12px 16px;font-size:var(--fs-base);width:100%;font-family:inherit}
 textarea{min-height:100px;resize:vertical}
 .row{display:flex;gap:14px;align-items:center;margin-bottom:14px}
@@ -597,6 +738,7 @@ html[data-theme="light"] header .theme-bar button.active{background:#fff;color:v
 </style>
 </head>
 <body>
+
 <script>
 (function(){
   var t=localStorage.getItem('theme')||'dark';
@@ -878,24 +1020,24 @@ html[data-theme="light"] header .theme-bar button.active{background:#fff;color:v
 
 </main>
 <script>
-document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'))
-  document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'))
+document.querySelectorAll('.tab').forEach(function(t){t.onclick=function(){
+  document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')})
+  document.querySelectorAll('.pane').forEach(function(x){x.classList.remove('active')})
   t.classList.add('active')
   document.getElementById('pane-'+t.dataset.tab).classList.add('active')
-})
+}})
 
-document.getElementById('btn-run').onclick=async()=>{
-  const btn=document.getElementById('btn-run')
-  const log=document.getElementById('run-log')
-  const status=document.getElementById('run-status')
+var btnRun=document.getElementById('btn-run');if(btnRun)btnRun.onclick=async function(){
+  var btn=document.getElementById('btn-run')
+  var log=document.getElementById('run-log')
+  var status=document.getElementById('run-status')
   btn.disabled=true;btn.textContent='运行中...'
   status.className='tag online';status.textContent='运行中'
   log.textContent=''
-  const es=new EventSource('/run')
-  let started=false
-  es.onmessage=(e)=>{
-    const d=JSON.parse(e.data)
+  var es=new EventSource('/run')
+  var started=false
+  es.onmessage=function(e){
+    var d=JSON.parse(e.data)
     if(d.type==='start'){started=true;log.textContent+='分身开始醒来...\\n'}
     else if(d.type==='stdout'){log.textContent+=d.text+'\\n';log.classList.add('streaming');log.scrollTop=log.scrollHeight}
     else if(d.type==='stderr'){log.textContent+='[错误] '+d.text+'\\n'}
@@ -904,46 +1046,25 @@ document.getElementById('btn-run').onclick=async()=>{
       log.textContent+=('\\n完成，退出码: '+d.code+' 于 '+new Date(d.time).toLocaleTimeString()+'\\n')
       status.className=d.code===0?'tag online':'tag offline'
       status.textContent=d.code===0?'完成 (码0)':'退出码 '+d.code
-      btn.disabled=false;btn.textContent='再来一次'
-      es.close()
-    }else if(d.type==='error'){
-      log.classList.remove('streaming')
-      log.textContent+='\\n[错误] '+d.text+'\\n'
-      btn.disabled=false;btn.textContent='再来一次'
+      btn.disabled=false;btn.textContent='唤醒分身'
       es.close()
     }
   }
+  es.onerror=function(){if(!started){log.textContent='连接失败，检查服务端口\\n';btn.disabled=false;btn.textContent='唤醒分身';es.close()}}
 }
 
-async function saveConfig(path,data){
-  await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+var btnSaveC=document.getElementById('btn-save-owner');if(btnSaveC)btnSaveC.onclick=async function(){
+  var body={bili:{}}
+  var n=document.getElementById('cf-owner-name').value.trim();if(n)body.bili.ownerName=n
+  var m=document.getElementById('cf-owner-mid').value.trim();if(m)body.bili.ownerMid=m
+  await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+  alert('已保存');location.reload()
 }
-document.getElementById('btn-save-persona').onclick=()=>{
-  saveConfig('/config',{
-    persona:{
-      name:document.getElementById('cf-name').value,
-      tags:document.getElementById('cf-tags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)
-    },
-    preferences:{
-      like:document.getElementById('cf-like').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean),
-      dislike:document.getElementById('cf-dislike').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)
-    }
-  }).then(()=>{alert('人设已保存');location.reload()})
-}
-document.getElementById('btn-save-budget').onclick=()=>{
-  saveConfig('/config',{budget:{dailyTokens:parseInt(document.getElementById('cf-budget').value)||50000}})
-    .then(()=>{alert('预算已保存');location.reload()})
-}
-document.getElementById('btn-save-owner').onclick=()=>{
-  saveConfig('/config',{bili:{
-    ownerName:document.getElementById('cf-owner-name').value,
-    ownerMid:document.getElementById('cf-owner-mid').value
-  }}).then(()=>{alert('用户信息已保存');location.reload()})
-}
-document.getElementById('btn-save-fw').onclick=async()=>{
-  const body={
+
+var btnSaveFW=document.getElementById('btn-save-fw');if(btnSaveFW)btnSaveFW.onclick=async function(){
+  var body={
     enabled:document.getElementById('fw-enabled').checked,
-    interval:parseInt(document.getElementById('fw-interval').value)||300,
+    interval:document.getElementById('fw-interval').value,
     onlyWhitelist:document.getElementById('fw-ol').checked,
     whitelist:document.getElementById('fw-wl').value,
     blacklist:document.getElementById('fw-bl').value,
@@ -952,27 +1073,27 @@ document.getElementById('btn-save-fw').onclick=async()=>{
   await fetch('/follow-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
   alert('关注守望已保存并重启');location.reload()
 }
-window.testFollowFetch=async()=>{
-  const r=await fetch('/follow-test').then(r=>r.json())
-  const items=r.items||[]
-  let msg=''
+window.testFollowFetch=async function(){
+  var r=await fetch('/follow-test').then(function(r){return r.json()})
+  var items=r.items||[]
+  var msg=''
   if(items.length>0){
-    msg='API OK! '+items.length+' feeds:\n'
-    items.slice(0,5).forEach(i=>{ msg+='  '+i.pub+' '+i.up+'('+i.mid+') '+i.title+' BV='+i.bvid+'\n' })
+    msg='API OK! '+items.length+' feeds:\\n'
+    items.slice(0,5).forEach(function(i){msg+='  '+i.pub+' '+i.up+'('+i.mid+') '+i.title+' BV='+i.bvid+'\\n'})
   }else{
     msg='API returned: '+(r.error||'empty, cookie expired?')
   }
   alert(msg)
 }
-document.getElementById('btn-save-doubao').onclick=async()=>{
-  const k=document.getElementById('cred-doubao-key').value
-  const e=document.getElementById('cred-endpoint').value
+var d=document.getElementById('btn-save-doubao');if(d)d.onclick=async function(){
+  var k=document.getElementById('cred-doubao-key').value
+  var e=document.getElementById('cred-endpoint').value
   if(!k&&!e){alert('请至少填一项');return}
   await fetch('/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doubaoApiKey:k,doubaoEndpointId:e})})
   alert('豆包凭据已保存');location.reload()
 }
-document.getElementById('btn-save-bili').onclick=async()=>{
-  const cookie=document.getElementById('cred-bili-cookie').value
+var bi=document.getElementById('btn-save-bili');if(bi)bi.onclick=async function(){
+  var cookie=document.getElementById('cred-bili-cookie').value
   if(!cookie.trim()){alert('请粘贴 Cookie');return}
   await fetch('/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({biliCookie:cookie})})
   alert('B站 Cookie 已保存');location.reload()
@@ -980,8 +1101,9 @@ document.getElementById('btn-save-bili').onclick=async()=>{
 
 async function loadDiary(){
   var KIND_LABEL={wake:'醒来',thought:'想法',feeling:'心情',action:'动作',comment:'评论',summary:'总结',event:'事件'}
-  var diary=await fetch('/diary').then(r=>r.json())
+  var diary=await fetch('/diary').then(function(r){return r.json()})
   var list=document.getElementById('diary-list')
+  if(!list)return
   if(!Array.isArray(diary)||diary.length===0){list.innerHTML='<p class="mini">还没有日记，唤醒分身一次就会有了~</p>';return}
   list.innerHTML=diary.slice().reverse().map(function(d){
     var evts=(d.events||[]).map(function(ev){
@@ -999,70 +1121,85 @@ async function loadDiary(){
       '</div>'
     }).join('')
     return '<div class="diary-day">'+
-      '<div class="diary-day-head">'+
-        '<span class="diary-date">'+(d.date||'')+'</span>'+
-        '<span class="diary-summary">'+(d.summary||'')+'</span>'+
-      '</div>'+
+      '<div class="diary-date">'+d.date+' <span class="mini">'+(d.summary||'')+'</span></div>'+
       evts+
     '</div>'
   }).join('')
 }
 loadDiary()
 
-async function runTool(name){
-  const params={
-    search:'q',video:'bvid',whois:'mid',feed:null
-  }[name]
-  const val=params?document.getElementById('tool-'+name+'-'+params).value:''
-  const url='/tools/'+name+(params?('?'+params+'='+encodeURIComponent(val)):'')
-  const res=await fetch(url)
-  const text=await res.text()
-  document.getElementById('tool-result').textContent=text
+var btnRunDaily=document.getElementById('btn-run-daily');if(btnRunDaily)btnRunDaily.onclick=async function(){
+  await fetch('/run-daily',{method:'POST'})
+  alert('已触发日常唤醒')
 }
 
-(function(){
-  var themeBtn=document.getElementById('btn-theme');
-  var fsBtns={sm:document.getElementById('btn-fs-sm'),md:document.getElementById('btn-fs-md'),lg:document.getElementById('btn-fs-lg')};
-  var fsMap={sm:15,md:17,lg:19};
-  var fsLabels={sm:'小',md:'中',lg:'大'};
-  function refresh(){
-    var t=document.documentElement.getAttribute('data-theme')||'dark';
-    themeBtn.textContent=t==='dark'?'🌙':'☀️';
-    themeBtn.title=t==='dark'?'切换到白天模式':'切换到夜间模式';
-    var curFs=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fs-base'))||17;
-    for(var k in fsMap){
-      fsBtns[k].classList.toggle('active',fsMap[k]===curFs);
-    }
-  }
-  themeBtn.onclick=function(){
-    var t=document.documentElement.getAttribute('data-theme')||'dark';
-    t=t==='dark'?'light':'dark';
-    document.documentElement.setAttribute('data-theme',t);
-    localStorage.setItem('theme',t);
-    refresh();
-  };
-  for(var k in fsMap){
-    fsBtns[k].onclick=(function(k){return function(){
-      document.documentElement.style.setProperty('--fs-base',fsMap[k]+'px');
-      localStorage.setItem('fs',fsMap[k]);
-      refresh();
-    };})(k);
-  }
-  refresh();
-})();
+function toast(msg,type){
+  var t=document.createElement('div')
+  t.textContent=msg
+  t.style.cssText='position:fixed;top:24px;right:24px;padding:12px 20px;border-radius:10px;color:#fff;z-index:9999;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,.3);transition:opacity .3s;opacity:0'
+  t.style.background=type==='error'?'#ff4d4f':type==='ok'?'#52c41a':'#0ea5e9'
+  document.body.appendChild(t)
+  requestAnimationFrame(function(){t.style.opacity=1})
+  setTimeout(function(){t.style.opacity=0;setTimeout(function(){t.remove()},300)},2500)
+}
 
-fetch('/api/version').then(r=>r.json()).then(d=>{
-  var el=document.getElementById('ver-badge');
-  if(el&&d.version) el.textContent='v'+d.version;
-}).catch(()=>{});
+var editingTaskId=null
+async function saveTask(){
+  console.log('[saveTask] called')
+  var nameEl=document.getElementById('tk-name')
+  var urlEl=document.getElementById('tk-target-url')
+  var dayEl=document.getElementById('tk-day')
+  var timeEl=document.getElementById('tk-time')
+  var leadEl=document.getElementById('tk-lead')
+  var task={
+    id:editingTaskId||('task-'+Date.now()),
+    name:nameEl.value.trim(),
+    targetUrl:urlEl.value.trim(),
+    day:parseInt(dayEl.value),
+    time:timeEl.value,
+    leadMin:parseInt(leadEl.value)||15,
+    template:document.getElementById('tk-template').value.trim(),
+    ownerRef:document.getElementById('tk-owner-ref').value.trim(),
+    description:document.getElementById('tk-desc').value.trim(),
+    enabled:true,
+  }
+  if(!task.name){nameEl.focus();nameEl.style.borderColor='#ff6b6b';toast('请填任务名称','error');return}
+  if(!task.targetUrl){urlEl.focus();urlEl.style.borderColor='#ff6b6b';toast('请填视频链接','error');return}
+  if(!/^(https?:)?\\/\\//.test(task.targetUrl)&&!/^BV\\d+/.test(task.targetUrl)&&!/^ss\\d+/.test(task.targetUrl)){
+    urlEl.focus();urlEl.style.borderColor='#ff6b6b';toast('视频链接格式不对','error');return
+  }
+  if(isNaN(task.day)||task.day<0||task.day>6){dayEl.focus();dayEl.style.borderColor='#ff6b6b';toast('请选更新日','error');return}
+  if(!task.time||!/^\\d{1,2}:\\d{2}$/.test(task.time)){timeEl.focus();timeEl.style.borderColor='#ff6b6b';toast('上线时间格式应为 HH:MM','error');return}
+  if(task.leadMin<0||task.leadMin>120){leadEl.focus();leadEl.style.borderColor='#ff6b6b';toast('提前量在 0-120 分钟之间','error');return}
+  ;[nameEl,urlEl,dayEl,timeEl,leadEl].forEach(function(el){if(el)el.style.borderColor=''})
+  var saveBtn=document.getElementById('tk-save-btn')
+  if(saveBtn){saveBtn.disabled=true;saveBtn.textContent='保存中...'}
+  var resp=await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add',task})})
+  var result=await resp.json()
+  if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='保存任务'}
+  if(result.ok){
+    toast('任务已保存 ✓','ok')
+    editingTaskId=null
+    var hint=document.getElementById('tk-editor-hint');if(hint)hint.remove()
+    ;['tk-name','tk-target-url','tk-template','tk-owner-ref','tk-desc'].forEach(function(id){var e=document.getElementById(id);if(e)e.value=''})
+    if(dayEl)dayEl.value='6'
+    if(timeEl)timeEl.value='11:00'
+    if(leadEl)leadEl.value='20'
+    loadTasks()
+    window.scrollTo({top:document.getElementById('pane-tasks').offsetTop-40,behavior:'smooth'})
+  }else{
+    toast('保存失败','error')
+  }
+}
 
 async function loadTasks(){
-  var list=await fetch('/api/tasks').then(r=>r.json())
+  var list=await fetch('/api/tasks').then(function(r){return r.json()})
   var wrap=document.getElementById('task-list')
+  if(!wrap)return
   if(!list||list.length===0){wrap.innerHTML='<div class="task-empty">还没有定时任务，下面加一个吧~</div>';return}
   wrap.innerHTML=list.map(function(t){
     var chip='<span class="task-chip '+(t.enabled===false?'disabled':(t.todayDone?'done':'pending'))+'">'+
-      (t.enabled===false?'已暂停':(t.todayDone?(t.todayStatus==='fail'?'失败❌':'今日已完成✅'):'待触发'))+'</span>'
+      (t.enabled===false?'已暂停':(t.todayDone?(t.todayStatus==='fail'?'失败':'今日已完成'):'待触发'))+'</span>'
     var meta='<div class="task-meta">'+
       '<span class="task-chip">'+(t.days||'每天')+'</span>'+
       '<span class="task-chip">'+(t.time||'--:--')+'</span>'+
@@ -1086,76 +1223,159 @@ async function loadTasks(){
     '</div>'
   }).join('')
 }
-var editingTaskId=null
-async function saveTask(){
-  var task={
-    id:editingTaskId||('task-'+Date.now()),
-    name:document.getElementById('tk-name').value.trim(),
-    targetUrl:document.getElementById('tk-target-url').value.trim(),
-    day:parseInt(document.getElementById('tk-day').value),
-    time:document.getElementById('tk-time').value,
-    leadMin:parseInt(document.getElementById('tk-lead').value)||15,
-    template:document.getElementById('tk-template').value.trim(),
-    ownerRef:document.getElementById('tk-owner-ref').value.trim(),
-    description:document.getElementById('tk-desc').value.trim(),
-    enabled:true,
-  }
-  if(!task.name){alert('请填任务名称');return}
-  await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add',task})})
-  editingTaskId=null
-  document.getElementById('tk-editor-hint')?.remove()
-  ['tk-name','tk-target-url','tk-template','tk-owner-ref','tk-desc'].forEach(function(id){document.getElementById(id).value=''})
-  document.getElementById('tk-day').value='6'
-  document.getElementById('tk-time').value='11:00'
-  document.getElementById('tk-lead').value='20'
-  loadTasks()
-}
+
 async function editTask(btn){
   var id=btn.dataset.id
-  var list=await fetch('/api/tasks').then(r=>r.json())
-  var t=list.find(x=>x.id===id)
+  var list=await fetch('/api/tasks').then(function(r){return r.json()})
+  var t=list.find(function(x){return x.id===id})
   if(!t)return
   editingTaskId=id
   document.getElementById('tk-name').value=t.name||''
   document.getElementById('tk-target-url').value=t.targetUrl||''
-  document.getElementById('tk-day').value=String(t.day)
-  document.getElementById('tk-time').value=t.time||'11:00'
+  document.getElementById('tk-day').value=t.day!=null?t.day:''
+  document.getElementById('tk-time').value=t.time||''
   document.getElementById('tk-lead').value=t.leadMin||15
   document.getElementById('tk-template').value=t.template||''
   document.getElementById('tk-owner-ref').value=t.ownerRef||''
   document.getElementById('tk-desc').value=t.description||''
-  document.getElementById('tk-editor-hint')?.remove()
+  var hint=document.getElementById('tk-editor-hint')
+  if(!hint){
+    hint=document.createElement('div')
+    hint.id='tk-editor-hint'
+    hint.style.cssText='background:#fff7e6;border:1px solid #ffd591;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:14px;color:#d46b08;display:flex;justify-content:space-between;align-items:center'
+    hint.innerHTML='正在编辑任务，保存会覆盖原有设置 <button class="btn ghost danger" style="padding:4px 10px;min-width:auto" onclick="cancelEdit()">取消编辑</button>'
+    var card=document.querySelector('#pane-tasks .card:last-of-type')||document.body
+    card.insertBefore(hint, card.firstChild)
+  }
   var saveBtn=document.getElementById('tk-save-btn')
-  if(saveBtn){saveBtn.textContent='更新任务';document.getElementById('tk-cancel-btn')?.remove();saveBtn.insertAdjacentHTML('afterend',' <button class="btn ghost" id="tk-cancel-btn" onclick="cancelEdit()">取消编辑</button>')}
+  if(saveBtn)saveBtn.textContent='更新任务'
   window.scrollTo({top:document.getElementById('pane-tasks').offsetTop-40,behavior:'smooth'})
 }
 function cancelEdit(){
   editingTaskId=null
-  document.getElementById('tk-name').value=''
-  document.getElementById('tk-target-url').value=''
-  document.getElementById('tk-template').value=''
-  document.getElementById('tk-owner-ref').value=''
-  document.getElementById('tk-desc').value=''
-  document.getElementById('tk-day').value='6'
-  document.getElementById('tk-time').value='11:00'
-  document.getElementById('tk-lead').value='20'
-  var saveBtn=document.getElementById('tk-save-btn')
-  if(saveBtn)saveBtn.textContent='保存任务'
-  document.getElementById('tk-cancel-btn')?.remove()
+  var hint=document.getElementById('tk-editor-hint');if(hint)hint.remove()
+  ;['tk-name','tk-target-url','tk-template','tk-owner-ref','tk-desc'].forEach(function(id){var e=document.getElementById(id);if(e)e.value=''})
+  var d=document.getElementById('tk-day');if(d)d.value='6'
+  var ti=document.getElementById('tk-time');if(ti)ti.value='11:00'
+  var l=document.getElementById('tk-lead');if(l)l.value='20'
+  var saveBtn=document.getElementById('tk-save-btn');if(saveBtn)saveBtn.textContent='保存任务'
 }
+
 async function toggleTask(btn){
   var id=btn.dataset.id
-  await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'toggle',id})})
+  await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'toggle',id:id})})
   loadTasks()
 }
 async function deleteTask(btn){
   var id=btn.dataset.id
   if(!confirm('确定删除这个任务吗？'))return
-  await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete',id})})
+  await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete',id:id})})
   loadTasks()
 }
+
+var biliFlPage=1
+var biliFlPs=20
+async function refreshBiliSelf(){
+  var nameEl=document.getElementById('bili-self-name');var faceEl=document.getElementById('bili-self-face')
+  if(!nameEl&&!faceEl)return
+  var r=await fetch('/api/bili/self').then(function(r){return r.json()})
+  if(r.error){if(nameEl)nameEl.textContent='⚠ '+r.error;return}
+  if(faceEl)faceEl.src=r.face||''
+  if(nameEl)nameEl.textContent=r.name||'?'
+  var midEl=document.getElementById('bili-self-mid');if(midEl)midEl.textContent='UID: '+r.mid+'  ·  Lv.'+(r.level||0)
+  var statsEl=document.getElementById('bili-self-stats');if(statsEl)statsEl.textContent='关注 '+(r.following||0)+'  ·  粉丝 '+(r.follower||0)+(r.sign?'  ·  '+r.sign:'')
+}
+async function loadBiliFollowings(pn){
+  if(pn)biliFlPage=pn
+  var listEl=document.getElementById('bili-fl-list')
+  var pager=document.getElementById('bili-fl-pager')
+  var countEl=document.getElementById('bili-fl-count')
+  if(!listEl&&!pager&&!countEl)return
+  var r=await fetch('/api/bili/followings?pn='+biliFlPage+'&ps='+biliFlPs).then(function(r){return r.json()})
+  if(countEl)countEl.textContent='(共 '+r.total+' 人)'
+  if(r.error){if(listEl)listEl.innerHTML='<div class="mini" style="color:var(--c-err)">'+r.error+'</div>';if(pager)pager.innerHTML='';return}
+  var list=r.list||[]
+  if(list.length===0){if(listEl)listEl.innerHTML='<div class="mini" style="color:var(--c-text-dim)">还没有关注任何人</div>';if(pager)pager.innerHTML='';return}
+  var html=''
+  for(var i=0;i<list.length;i++){
+    var u=list[i]
+    html+='<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--c-bg3);border-radius:10px;margin-bottom:8px">'
+    html+='<img src="'+u.face+'" style="width:40px;height:40px;border-radius:50%;background:#333">'
+    html+='<div style="flex:1;min-width:0">'
+    html+='<div style="font-weight:500">'+u.name+(u.official?' <span class="mini" style="color:var(--c-accent)">'+u.official+'</span>':'')+(u.live?' <span class="mini" style="color:var(--c-err)">直播中</span>':'')+'</div>'
+    html+='<div class="mini">UID: '+u.mid+(u.fans?'  ·  粉丝 '+u.fans:'')+(u.sign?'  ·  '+u.sign.slice(0,40):'')+'</div>'
+    html+='</div>'
+    html+='<button class="btn ghost danger" style="padding:6px 14px;min-width:auto" onclick="doUnfollow('+u.mid+')">取关</button>'
+    html+='</div>'
+  }
+  if(listEl)listEl.innerHTML=html
+  var totalPages=Math.max(1,Math.ceil(r.total/biliFlPs))
+  var pg=''
+  if(biliFlPage>1)pg+='<button class="btn ghost" style="padding:4px 12px;min-width:auto" onclick="loadBiliFollowings('+(biliFlPage-1)+')">上一页</button>'
+  pg+='<span class="mini" style="align-self:center">'+biliFlPage+'/'+totalPages+'</span>'
+  if(biliFlPage<totalPages)pg+='<button class="btn ghost" style="padding:4px 12px;min-width:auto" onclick="loadBiliFollowings('+(biliFlPage+1)+')">下一页</button>'
+  if(pager)pager.innerHTML=pg
+}
+async function doFollow(){
+  var mid=document.getElementById('bili-follow-mid').value.trim()
+  if(!mid){alert('请输入 MID');return}
+  if(!confirm('确认关注 MID '+mid+' ?'))return
+  var r=await fetch('/api/bili/follow',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mid:Number(mid)})}).then(function(r){return r.json()})
+  if(r.ok){refreshBiliSelf();loadBiliFollowings();toast('关注成功','ok')}
+  else toast('关注失败: '+(r.error||''),'error')
+}
+async function doUnfollow(mid){
+  if(!confirm('确认取关 MID '+mid+' ?'))return
+  var r=await fetch('/api/bili/unfollow',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mid:mid})}).then(function(r){return r.json()})
+  if(r.ok){refreshBiliSelf();loadBiliFollowings()}
+  else toast('取关失败: '+(r.error||''),'error')
+}
+
+async function runTool(kind){
+  var resultEl=document.getElementById('tool-result')
+  function showErr(msg){ toast(msg,'error'); if(resultEl)resultEl.textContent='❌ '+msg }
+  var url='', q, label=''
+  if(kind==='search'){
+    q=document.getElementById('tool-search-q'); if(!q)return
+    var v=q.value.trim()
+    if(!v){ toast('请输入搜索关键词','error'); q.focus(); q.style.borderColor='#ff6b6b'; return }
+    q.style.borderColor=''
+    url='/tools/search?q='+encodeURIComponent(v); label='搜索: '+v
+  }else if(kind==='video'){
+    q=document.getElementById('tool-video-bvid'); if(!q)return
+    var v=q.value.trim()
+    if(!v){ toast('请输入视频 BV 号','error'); q.focus(); q.style.borderColor='#ff6b6b'; return }
+    if(!/^BV[A-Za-z0-9]+$/i.test(v)){ toast('BV 号格式不对，应以 BV 开头，如 BV1xx411c7mu','error'); q.focus(); q.select(); q.style.borderColor='#ff6b6b'; return }
+    q.style.borderColor=''
+    url='/tools/video?bvid='+v; label='视频: '+v
+  }else if(kind==='whois'){
+    q=document.getElementById('tool-whois-mid'); if(!q)return
+    var v=q.value.trim()
+    if(!v){ toast('请输入 UP 主 MID','error'); q.focus(); q.style.borderColor='#ff6b6b'; return }
+    if(!/^\d+$/.test(v)){ toast('MID 必须是纯数字','error'); q.focus(); q.select(); q.style.borderColor='#ff6b6b'; return }
+    q.style.borderColor=''
+    url='/tools/whois?mid='+v; label='MID: '+v
+  }else if(kind==='feed'){
+    url='/tools/feed'; label='刷新 Feed'
+  }else{ toast('未知工具: '+kind,'error'); return }
+  toast('请求中...','info')
+  if(resultEl){ resultEl.textContent='⏳ '+label+'\\n请求中，请稍候...\\n'; resultEl.scrollTop=0 }
+  try{
+    var r=await fetch(url)
+    var text=await r.text()
+    if(!r.ok){ if(resultEl)resultEl.textContent='❌ HTTP '+r.status+'\\n\\n'+text; toast('请求失败: '+r.status,'error'); return }
+    if(resultEl)resultEl.textContent=text || '(空输出)'
+    toast('完成 ✓','ok')
+  }catch(e){
+    if(resultEl)resultEl.textContent='❌ 网络错误: '+e.message
+    toast('网络错误','error')
+  }
+}
+
 loadTasks()
 setInterval(loadTasks,30000)
+refreshBiliSelf()
+loadBiliFollowings()
 </script>
 </body>
 </html>`

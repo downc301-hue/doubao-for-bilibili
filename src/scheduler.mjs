@@ -5,13 +5,22 @@ import { spawn } from 'node:child_process'
 
 const DATA_DIRS = [
   path.join(os.homedir(), '.doubao-bot'),
+  'C:\\Users\\Administrator\\.doubao-bot',
+  'C:\\Users\\admin\\.doubao-bot',
+  'C:\\root\\.doubao-bot',
   path.join(process.cwd(), '.doubao-bot'),
-  path.join(os.homedir(), '.dsh'),
-  path.join(process.cwd(), '.dsh'),
 ]
 function resolveDataDir() {
   for (const d of DATA_DIRS) {
-    try { if (fs.existsSync(d)) { fs.mkdirSync(d, { recursive: true }); return d } } catch {}
+    try {
+      if (fs.existsSync(path.join(d, 'credentials.json')) || fs.existsSync(path.join(d, 'config.json'))) {
+        try { fs.mkdirSync(d, { recursive: true }) } catch {}
+        return d
+      }
+    } catch {}
+  }
+  for (const d of DATA_DIRS) {
+    try { if (fs.existsSync(d)) { try { fs.mkdirSync(d, { recursive: true }) } catch {} return d } } catch {}
   }
   const p = path.join(os.homedir(), '.doubao-bot')
   try { fs.mkdirSync(p, { recursive: true }) } catch {}

@@ -202,6 +202,42 @@ new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false })
 - [ ] 重新跑 web.mjs / scheduler 之前：先 `taskkill /F /IM node.exe` 清干净旧进程
 - [ ] IDE 报错 "端口被占用"：先 kill 再想别的，不要猜
 
+### 4.6 Windows PowerShell 约束（重点，不仅是误读，更会真的破坏源码）
+
+#### 原理
+PowerShell 把逗号 `,` 识别为数组构造符，有两种破坏源码的场景：
+- **读取时吞逗号**：Get-Content / Select-String / grep 等命令的输出，在通过 PowerShell 参数传递的过程中逗号会被数组化后丢掉，导致你"看到"源码缺逗号（但磁盘文件是好的）
+- **写入时丢逗号**：用 PowerShell here-string（`@'...'@`）或 `node -e "..."` 内联脚本把含逗号的 JS 代码写进文件时，PowerShell 作为**脚本解释器**会真的把逗号删掉——这时磁盘上的源码已经坏了
+
+#### 核心强制规则
+1. **判断源码内容、字符、标点、语法时，严禁使用 PowerShell 命令行（Get-Content、Select-String、grep 等）截取代码片段做分析！**
+   必须用内置 Read 工具读取原始字节，以文件原始字节作为唯一可信基准。
+2. **绝对禁止用 PowerShell here-string 写含大量逗号的 JS 代码到文件。**
+   包括：`@'...'@ | Out-File xxx.mjs`、`node -e "..."` 里内联 fetch 参数（`{method:'POST',headers:...}` 这种）。
+3. **正确的做法**：
+   - 用 Write 工具直接写 `.mjs` 文件（优先）
+   - 或者先写一个临时 `.mjs` 脚本（不含逗号敏感内容），再执行它去拼接/修改目标文件
+4. 执行文本检索、代码片段提取任务：
+   - 优先使用内置文件工具；
+   - 如果必须调用 shell，**禁止使用 PowerShell**，切换为 CMD / Git Bash / WSL。
+
+#### 负向约束（不能做）
+- ❌ 不允许基于 PowerShell 命令输出，推断源码丢逗号；
+- ❌ 不允许根据被 PowerShell 篡改后的片段，修改源码去补逗号；
+- ❌ 不允许使用 PowerShell here-string 写含 fetch/JSON 参数的 JS 代码；
+- ❌ 不允许用 `node -e "..."` 内联多行含逗号的代码。
+
+#### 快速判定口诀
+> PowerShell 读到缺逗号 = 优先怀疑 shell 吞符号，**不要直接改代码**，先用 Read 工具校验原始文件。
+> PowerShell 写过的文件有语法错 = **100% 是 PowerShell 搞的**，立刻从备份恢复。
+
+#### 实战教训（2026-10-19）
+给 `web.mjs` 的 `<script>` 块新增 B 站关注管理函数，用 PowerShell here-string 拼接后写回文件。结果：
+- `fetch('/url',{method:'POST',headers:{...},body:...})` → 所有逗号丢失，变成 `fetch('/url'{method:'POST'...})`
+- `setInterval(loadTasks, 30000)` → 变成 `setInterval(loadTasks30000)`
+- `.bak` 备份文件里也有同样的历史损坏，说明这个坑之前已经踩过但没记录
+- **修复花了 40 分钟**：先定位 script 块边界，再从 .bak 提取未损坏部分，最后用独立 `.mjs` 脚本干净地重写整个 script 块
+
 ---
 
 ## 5. 快速同步脚本（可选，加到 PowerShell Profile）
