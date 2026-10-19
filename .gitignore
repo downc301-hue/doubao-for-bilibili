@@ -1,0 +1,74 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+
+# Build output
+dist/
+build/
+out/
+target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temp
+*.tmp
+*.temp
+.cache/
+
+# ============================================================
+# 🔒 用户敏感数据（绝不能进 git）
+# ============================================================
+# B 站凭据（SESSDATA / bili_jct / buvid3）
+credentials.json
+credentials.local.json
+
+# 豆包 API Key
+doubao-api-key.json
+ark-credentials.json
+
+# 用户运行时数据（日记、token 用量、任务状态）
+.doubao-bot/
+.dsh/
+~/.doubao-bot/
+~/.dsh/
+~/.bili-ai/
+
+# 本地运行时产生的持久化状态
+follow-processed.json
+scheduler-state.json
+tokens.json
+tasks.local.json
+config.local.json
+follow-config.local.json
+
+# 包含真实 Token / Cookie 的配置快照
+**/credentials*.json
+**/config.*.local
+**/*secret*
+**/*token*
+**/*cookie*
+**/*key*.json
+# AI IDE 配置
+.trae/
+

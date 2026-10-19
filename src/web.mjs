@@ -1,0 +1,1151 @@
+import http from 'node:http'
+import fs from 'node:fs'
+import path from 'node:path'
+import os from 'node:os'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { getTasks, setTasks, getState, markDone, markFail, startScheduler, startFollowWatcher, stopFollowWatcher, getFollowStatus, getNextRun } from './scheduler.mjs'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+function resolveDataDir() {
+  const candidates = [
+    path.join(os.homedir(), '.doubao-bot'),
+    'C:\\Users\\Administrator\\.doubao-bot',
+    'C:\\Users\\admin\\.doubao-bot',
+    'C:\\root\\.doubao-bot',
+    '/root/.doubao-bot',
+    path.join(process.cwd(), '.doubao-bot'),
+  ]
+  for (const dir of candidates) {
+    try {
+      if (fs.existsSync(path.join(dir, 'credentials.json')) || fs.existsSync(path.join(dir, 'config.json'))) {
+        return dir
+      }
+    } catch {}
+  }
+  return candidates[0]
+}
+
+function findFile(candidates) {
+  for (const p of candidates) {
+    try { if (fs.existsSync(p)) return p } catch {}
+  }
+  return null
+}
+
+function readWhaleLog() {
+  const candidates = [
+    path.join(os.homedir(), '.dsh', 'whale-log.jsonl'),
+    'C:\\Users\\Administrator\\.dsh\\whale-log.jsonl',
+    'C:\\Users\\admin\\.dsh\\whale-log.jsonl',
+    'C:\\root\\.dsh\\whale-log.jsonl',
+    'C:\\WINDOWS\\system32\\config\\systemprofile\\.dsh\\whale-log.jsonl',
+    path.join(process.cwd(), '.dsh', 'whale-log.jsonl'),
+    '/root/.dsh/whale-log.jsonl',
+  ]
+  const p = findFile(candidates)
+  if (!p) return []
+  try {
+    const raw = fs.readFileSync(p, 'utf8').trim()
+    if (!raw) return []
+    return raw.split('\n').map(line => {
+      try { return JSON.parse(line) } catch { return null }
+    }).filter(Boolean)
+  } catch { return [] }
+}
+
+const DATA_DIR = resolveDataDir()
+const PORT = process.env.PORT || 7890
+
+function readData(name) {
+  const p = path.join(DATA_DIR, name)
+  try {
+    return fs.readFileSync(p, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+function writeData(name, content) {
+  const p = path.join(DATA_DIR, name)
+  fs.mkdirSync(path.dirname(p), { recursive: true })
+  fs.writeFileSync(p, content, 'utf8')
+}
+
+function getJson(name) {
+  const raw = readData(name)
+  if (!raw) return {}
+  try { return JSON.parse(raw) } catch { return {} }
+}
+
+function setJson(name, obj) {
+  writeData(name, JSON.stringify(obj, null, 2) + '\n')
+}
+
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    req.on('data', c => chunks.push(c))
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8')
+      if (!raw) return resolve({})
+      try { resolve(JSON.parse(raw)) } catch { resolve({}) }
+    })
+    req.on('error', reject)
+  })
+}
+
+function send(res, status, body, type = 'application/json') {
+  res.writeHead(status, {
+    'Content-Type': type + '; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  })
+  res.end(body)
+}
+
+function sendHtml(res, html) {
+  send(res, 200, html, 'text/html')
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = ''
+    req.on('data', chunk => data += chunk)
+    req.on('end', () => resolve(data))
+    req.on('error', reject)
+  })
+}
+
+async function api(req, res, pathname) {
+  if (req.method === 'OPTIONS') return send(res, 200, 'ok')
+
+  if (pathname === '/' && req.method === 'GET') {
+    return sendHtml(res, renderDashboard())
+  }
+  if (pathname === '/config' && req.method === 'GET') {
+    const cfg = getJson('config.json')
+    const creds = getJson('credentials.json')
+    const publicCreds = {
+      hasDoubaoKey: !!creds.doubaoApiKey,
+      doubaoKeyMasked: creds.doubaoApiKey ? creds.doubaoApiKey.slice(0, 8) + '...' : '',
+      endpointId: creds.doubaoEndpointId || '',
+      biliCookieSet: !!(creds.sessdata && (creds.biliJct || creds.bili_jct)),
+    }
+    return send(res, 200, JSON.stringify({ ...cfg, _creds: publicCreds }))
+  }
+  if (pathname === '/config' && req.method === 'POST') {
+    const body = await parseBody(req)
+    const cfg = getJson('config.json')
+    if (body.preferences) cfg.preferences = body.preferences
+    if (body.budget) cfg.budget = body.budget
+    if (body.bili?.ownerMid) cfg.bili.ownerMid = body.bili.ownerMid
+    if (body.bili?.ownerName) cfg.bili.ownerName = body.bili.ownerName
+    if (body.bili?.sessionCookie) cfg.bili.sessionCookie = body.bili.sessionCookie
+    if (body.persona) cfg.persona = body.persona
+    setJson('config.json', cfg)
+    return send(res, 200, JSON.stringify({ ok: true }))
+  }
+  if (pathname === '/creds' && req.method === 'POST') {
+    const body = await parseBody(req)
+    const creds = getJson('credentials.json')
+    if (body.doubaoApiKey) creds.doubaoApiKey = body.doubaoApiKey
+    if (body.doubaoEndpointId) creds.doubaoEndpointId = body.doubaoEndpointId
+    if (body.biliCookie) {
+      const cookie = body.biliCookie
+      creds.sessdata = extractCookie(cookie, 'SESSDATA') || creds.sessdata
+      creds.bili_jct = extractCookie(cookie, 'bili_jct') || creds.bili_jct
+      creds.buvid3 = extractCookie(cookie, 'buvid3') || creds.buvid3
+    }
+    setJson('credentials.json', creds)
+    return send(res, 200, JSON.stringify({ ok: true }))
+  }
+  if (pathname === '/follow-config' && req.method === 'POST') {
+    const body = await parseBody(req)
+    const cfg = {
+      enabled: !!body.enabled,
+      interval: Math.max(180, Number(body.interval) || 300),
+      onlyWhitelist: !!body.onlyWhitelist,
+      whitelist: (body.whitelist || '').split(/[,，\s]+/).filter(Boolean),
+      blacklist: (body.blacklist || '').split(/[,，\s]+/).filter(Boolean),
+      templates: (body.templates || '').split('\n').map(s => s.trim()).filter(Boolean),
+    }
+    setJson('follow-config.json', cfg)
+    try { stopFollowWatcher() } catch {}
+    if (cfg.enabled) startFollowWatcher()
+    return send(res, 200, JSON.stringify({ ok: true, cfg }))
+  }
+  if (pathname === '/follow-test' && req.method === 'GET') {
+    const creds = getJson('credentials.json')
+    const cookie = `SESSDATA=${creds.sessdata}; bili_jct=${creds.bili_jct}; buvid3=${creds.buvid3}`
+    const H = { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', referer: 'https://space.bilibili.com/', cookie }
+    try {
+      const r = await fetch('https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all?type=video&page=1&timezone_offset=-480&platform=web', { headers: H })
+      const j = await r.json()
+      if (j?.code !== 0) return send(res, 200, JSON.stringify({ error: `code=${j?.code} ${j?.message || ''}` }))
+      const items = (j?.data?.items || []).slice(0, 15)
+      const out = []
+      for (const it of items) {
+        const a = it?.modules?.module_author
+        const ar = it?.modules?.module_dynamic?.major?.archive
+        if (!ar?.bvid) continue
+        out.push({
+          bvid: ar.bvid,
+          title: String(ar.title || '').slice(0, 50),
+          up: a?.name || '?',
+          mid: a?.mid || 0,
+          pub: (a?.pub_ts || 0) ? new Date(a.pub_ts * 1000).toLocaleString('zh-CN', { hour12: false }) : '?',
+        })
+      }
+      return send(res, 200, JSON.stringify({ count: out.length, items: out }))
+    } catch (e) {
+      return send(res, 200, JSON.stringify({ error: String(e.message) }))
+    }
+  }
+  if (pathname === '/diary' && req.method === 'GET') {
+    const logs = readWhaleLog()
+    const grouped = {}
+    for (const e of logs) {
+      const d = String(e.at || '').slice(0, 10)
+      if (!d) continue
+      if (!grouped[d]) grouped[d] = []
+      let kind = e.kind || ''
+      let note = e.note || ''
+      let target = e.target || ''
+      if (kind && kind.length > 30 && !note) {
+        note = kind
+        kind = 'thought'
+      }
+      if (!note && kind.length > 5) {
+        note = kind
+        kind = 'event'
+      }
+      if (!note) continue
+      grouped[d].push({
+        kind: kind,
+        target: target,
+        note: note,
+        time: String(e.at || '').slice(11, 16),
+      })
+    }
+    const diary = Object.entries(grouped).map(([date, events]) => {
+      const summaryEvt = events.find(e => e.kind === 'summary')
+      const summary = summaryEvt ? summaryEvt.note : `今天共 ${events.length} 条记录`
+      const body = events.filter(e => e.kind !== 'summary')
+      return { date, summary, events: body }
+    })
+    return send(res, 200, JSON.stringify(diary))
+  }
+  if (pathname === '/api/tasks' && req.method === 'GET') {
+    const all = (() => {
+      try { return JSON.parse(fs.readFileSync(path.join(resolveDataDir(), 'tasks.json'), 'utf8')) } catch { return [] }
+    })()
+    const state = getState()
+    const today = new Date().toLocaleDateString('sv-SE')
+    const enriched = all.map(t => {
+      const st = state[t.id || t.name]
+      const dowNames = ['周日','周一','周二','周三','周四','周五','周六']
+      const days = Array.isArray(t.day) ? t.day.map(d => dowNames[d] || d).join('/') : (typeof t.day==='number' ? dowNames[t.day] : '每天')
+      const nextRun = t.enabled === false ? null : (() => {
+        const d = new Date()
+        const triggerH = parseInt(t.time) - (t.leadMin || 0)
+        const triggerM = parseInt(t.time.split(':')[1] || '0') - (t.leadMin || 0)
+        return `${days} ${String(Math.floor(Math.max(0,triggerH)/60)).padStart(2,'0')+':'+String(Math.max(0,triggerH)%60).padStart(2,'0')}`
+      })()
+      const done = st?.date === today
+      return {
+        ...t,
+        days,
+        nextRun,
+        todayDone: done,
+        todayStatus: done ? (st.status || 'done') : 'pending',
+        lastRun: st?.date ? `${st.date} ${st.time||''} ${st.status==='fail'?'❌':'✅'}` : null,
+      }
+    })
+    return send(res, 200, JSON.stringify(enriched))
+  }
+  if (pathname === '/api/tasks' && req.method === 'POST') {
+    const body = JSON.parse(await readBody(req))
+    const all = (() => {
+      try { return JSON.parse(fs.readFileSync(path.join(resolveDataDir(), 'tasks.json'), 'utf8')) } catch { return [] }
+    })()
+    if (body.action === 'add') {
+      const newTask = {
+        id: body.task.id || ('task-' + Date.now()),
+        name: body.task.name,
+        targetUrl: body.task.targetUrl || '',
+        day: body.task.day,
+        time: body.task.time,
+        leadMin: body.task.leadMin || 15,
+        template: body.task.template || '',
+        ownerRef: body.task.ownerRef || '',
+        enabled: body.task.enabled !== false,
+        description: body.task.description || '',
+      }
+      const existingIdx = all.findIndex(t => t.id === newTask.id)
+      if (existingIdx >= 0) all[existingIdx] = newTask
+      else all.push(newTask)
+    } else if (body.action === 'delete') {
+      const id = body.id
+      const filtered = all.filter(t => t.id !== id)
+      const s = getState(); delete s[id]; fs.writeFileSync(path.join(resolveDataDir(), 'scheduler-state.json'), JSON.stringify(s, null, 2) + '\n')
+      setTasks(filtered)
+      return send(res, 200, JSON.stringify({ ok: true }))
+    } else if (body.action === 'toggle') {
+      const id = body.id
+      const t = all.find(x => x.id === id)
+      if (t) { t.enabled = !t.enabled; setTasks(all) }
+      return send(res, 200, JSON.stringify({ ok: true, enabled: t?.enabled }))
+    }
+    setTasks(all)
+    return send(res, 200, JSON.stringify({ ok: true }))
+  }
+  if (pathname === '/tokens' && req.method === 'GET') {
+    return send(res, 200, readData('tokens.json') || '{}')
+  }
+  if (pathname === '/debug' && req.method === 'GET') {
+    const paths = [
+      path.join(os.homedir(), '.doubao-bot', 'credentials.json'),
+      path.join(os.homedir(), '.doubao-bot', 'config.json'),
+      path.join(os.homedir(), '.bili-ai', 'credentials.json'),
+      'C:\\Users\\Administrator\\.doubao-bot\\credentials.json',
+      'C:\\Users\\Administrator\\.doubao-bot\\config.json',
+      'C:\\Users\\Administrator\\.bili-ai\\credentials.json',
+    ]
+    const info = paths.map(p => ({
+      path: p,
+      exists: fs.existsSync(p),
+      size: fs.existsSync(p) ? fs.statSync(p).size : 0,
+    }))
+    return send(res, 200, JSON.stringify({
+      homedir: os.homedir(),
+      cwd: process.cwd(),
+      paths: info,
+    }, null, 2))
+  }
+  if (pathname === '/run' && req.method === 'POST') {
+    return runDaily(req, res)
+  }
+  if (pathname === '/tools/search' && req.method === 'GET') {
+    const q = new URL(req.url, 'http://x').searchParams.get('q')
+    if (!q) return send(res, 400, JSON.stringify({ error: 'q required' }))
+    return runTool(res, ['search', q])
+  }
+  if (pathname === '/tools/video' && req.method === 'GET') {
+    const bvid = new URL(req.url, 'http://x').searchParams.get('bvid')
+    if (!bvid) return send(res, 400, JSON.stringify({ error: 'bvid required' }))
+    return runTool(res, ['video-content', bvid])
+  }
+  if (pathname === '/tools/whois' && req.method === 'GET') {
+    const mid = new URL(req.url, 'http://x').searchParams.get('mid')
+    if (!mid) return send(res, 400, JSON.stringify({ error: 'mid required' }))
+    return runTool(res, ['whois', mid])
+  }
+  if (pathname === '/tools/feed' && req.method === 'GET') {
+    return runTool(res, ['feed'])
+  }
+
+  return send(res, 404, JSON.stringify({ error: 'not found' }))
+}
+
+function extractCookie(cookieStr, name) {
+  const m = cookieStr.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'))
+  return m ? decodeURIComponent(m[1]) : null
+}
+
+function runDaily(req, res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  })
+
+  const child = spawn('node', ['src/run-daily.mjs'], {
+    cwd: path.resolve(__dirname, '..'),
+    env: { ...process.env, PATH: process.env.PATH },
+  })
+
+  const sendEvent = (data) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`)
+  }
+
+  sendEvent({ type: 'start', time: new Date().toISOString() })
+
+  child.stdout.on('data', (buf) => {
+    const lines = buf.toString().split('\n').filter(Boolean)
+    for (const line of lines) {
+      sendEvent({ type: 'stdout', text: line })
+    }
+  })
+
+  child.stderr.on('data', (buf) => {
+    sendEvent({ type: 'stderr', text: buf.toString() })
+  })
+
+  child.on('close', (code) => {
+    sendEvent({ type: 'done', code, time: new Date().toISOString() })
+    res.end()
+  })
+
+  child.on('error', (err) => {
+    sendEvent({ type: 'error', text: err.message })
+    res.end()
+  })
+
+  req.on('close', () => {
+    if (!child.killed) child.kill()
+  })
+}
+
+function runTool(res, args) {
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
+  const child = spawn('node', ['tools/bili.mjs', ...args], {
+    cwd: path.resolve(__dirname, '..'),
+  })
+  child.stdout.on('data', (b) => res.write(b))
+  child.stderr.on('data', (b) => res.write(b))
+  child.on('close', () => res.end())
+}
+
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, 'http://localhost')
+  api(req, res, url.pathname).catch(err => {
+    send(res, 500, JSON.stringify({ error: err.message }))
+  })
+})
+
+server.listen(PORT, () => {
+  console.log(`\n🌐 doubao-bot Web UI running at http://localhost:${PORT}`)
+  console.log(`   Dashboard:   http://localhost:${PORT}/`)
+  console.log(`   Port: ${PORT}  (set PORT env var to change)\n`)
+  startScheduler()
+  startFollowWatcher()
+})
+
+function renderDashboard() {
+  const cfg = getJson('config.json')
+  const creds = getJson('credentials.json')
+  const whaleLogs = readWhaleLog()
+  const tokens = getJson('tokens.json')
+  const fwCfg = getJson('follow-config.json')
+  const fwRunning = getFollowStatus()
+  const fwEnabled = fwCfg.enabled === true
+  const fwInterval = fwCfg.interval || 300
+  const fwOL = fwCfg.onlyWhitelist === true
+  const fwWL = (fwCfg.whitelist || []).join(', ')
+  const fwBL = (fwCfg.blacklist || []).join(', ')
+  const fwTpls = (fwCfg.templates || ['前排占个座~','沙发！支持UP主','第一！来啦来啦','抢个前排~']).join('\n')
+
+  const diaryMap = {}
+  for (const e of whaleLogs) {
+    const d = String(e.at || '').slice(0, 10)
+    if (!d) continue
+    if (!diaryMap[d]) diaryMap[d] = []
+    let kind = e.kind || ''
+    let note = e.note || ''
+    let target = e.target || ''
+    if (kind && kind.length > 30 && !note) { note = kind; kind = 'thought' }
+    if (!note && kind.length > 5) { note = kind; kind = 'event' }
+    if (!note) continue
+    diaryMap[d].push({ kind, target, note, time: String(e.at || '').slice(11, 16) })
+  }
+  const diaryDates = Object.keys(diaryMap).sort().reverse()
+  const latestDate = diaryDates[0] || null
+  const latestDiary = latestDate ? {
+    date: latestDate,
+    summary: (diaryMap[latestDate].find(e => e.kind === 'summary')?.note) || `今天 ${diaryMap[latestDate].length} 条`,
+    events: diaryMap[latestDate].filter(e => e.kind !== 'summary').slice(-2),
+  } : null
+
+  const tokenHistory = tokens.history || []
+  const todayTokens = tokenHistory.length > 0
+    ? tokenHistory[tokenHistory.length - 1].total || 0
+    : 0
+  const budget = cfg.budget?.dailyTokens || 50000
+  const tokenPct = Math.min(100, Math.round(todayTokens / budget * 100))
+
+  const persona = cfg.persona || {}
+  const preferences = cfg.preferences || {}
+  const bili = cfg.bili || {}
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>豆包 B站分身 · 控制台</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --c-bg:#0f1115;--c-bg2:#1a1d25;--c-bg3:#22252e;--c-bg4:#2a2d36;
+  --c-border:#252830;--c-border2:#2e3139;
+  --c-text:#e6e6e6;--c-text-dim:#889;--c-text-mid:#aab;--c-text-title:#c0c8d4;
+  --c-accent:#0ea5e9;--c-accent-hover:#38bdf8;
+  --c-ok:#52c41a;--c-warn:#faad14;--c-err:#ff4d4f;
+  --c-log:#0a0b0e;--c-log-border:#252830;
+  --c-tag-online-bg:#f6ffed;--c-tag-online-border:#b7eb8f;--c-tag-online-text:#52c41a;
+  --c-tag-offline-bg:#fff2f0;--c-tag-offline-border:#ffccc7;--c-tag-offline-text:#ff4d4f;
+  --fs-base:19px;
+}
+html[data-theme="light"]{
+  --c-bg:#f5f7fa;--c-bg2:#ffffff;--c-bg3:#f0f2f5;--c-bg4:#e4e7ed;
+  --c-border:#e4e7ed;--c-border2:#dcdfe6;
+  --c-text:#1f2937;--c-text-dim:#9aa5b1;--c-text-mid:#6b7280;--c-text-title:#374151;
+  --c-log:#1a1d25;--c-log-border:#dcdfe6;
+  --c-tag-online-bg:#f6ffed;--c-tag-online-border:#b7eb8f;--c-tag-online-text:#52c41a;
+  --c-tag-offline-bg:#fff2f0;--c-tag-offline-border:#ffccc7;--c-tag-offline-text:#ff4d4f;
+}
+html[data-theme="light"] header{background:#0ea5e9}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--c-bg);color:var(--c-text);min-height:100vh;font-size:var(--fs-base)}
+header{background:var(--c-accent);padding:28px 36px}
+header h1{font-size:30px;font-weight:600;color:#fff}
+header p{font-size:17px;color:#fff;opacity:.85;margin-top:8px}
+main{max-width:1200px;margin:32px auto;padding:0 28px}
+.card{background:var(--c-bg2);border-radius:16px;padding:28px;margin-bottom:22px;border:1px solid var(--c-border)}
+.card h2{font-size:22px;margin-bottom:18px;color:var(--c-text-title);display:flex;align-items:center;gap:12px;font-weight:600}
+.card h2::before{content:"";width:6px;height:24px;background:var(--c-accent);border-radius:3px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.stat{background:var(--c-bg3);border-radius:12px;padding:20px}
+.stat .label{font-size:15px;color:var(--c-text-dim)}
+.stat .value{font-size:30px;font-weight:600;margin-top:6px}
+.stat.ok .value{color:var(--c-ok)}
+.stat.warn .value{color:var(--c-warn)}
+.stat.err .value{color:var(--c-err)}
+.bar{height:10px;background:var(--c-bg4);border-radius:5px;margin-top:12px;overflow:hidden}
+.bar>div{height:100%;background:var(--c-accent);border-radius:5px;transition:width .3s}
+.bar.warn>div{background:linear-gradient(90deg,var(--c-warn),#ff7a45)}
+.bar.crit>div{background:linear-gradient(90deg,#ff7a45,var(--c-err))}
+.btn{background:var(--c-accent);color:#fff;border:none;padding:14px 26px;border-radius:12px;font-size:var(--fs-base);cursor:pointer;font-weight:500;transition:transform .15s,background .2s;white-space:nowrap;flex-shrink:0;min-width:110px}
+.btn:hover{transform:translateY(-1px);background:var(--c-accent-hover)}
+.btn:active{transform:translateY(0)}
+.btn.ghost{background:transparent;border:1px solid var(--c-accent);color:var(--c-accent)}
+.btn.danger{background:linear-gradient(135deg,#ff7a45,var(--c-err))}
+textarea,input,select{background:var(--c-bg3);border:1px solid var(--c-border2);border-radius:10px;color:var(--c-text);padding:12px 16px;font-size:var(--fs-base);width:100%;font-family:inherit}
+textarea{min-height:100px;resize:vertical}
+.row{display:flex;gap:14px;align-items:center;margin-bottom:14px}
+.row label{font-size:var(--fs-base);color:var(--c-text-mid);width:110px;flex-shrink:0}
+.tag{display:inline-block;background:var(--c-bg3);border:1px solid var(--c-border2);border-radius:22px;padding:5px 14px;font-size:15px;margin:2px}
+.tag.online{background:var(--c-tag-online-bg);border-color:var(--c-tag-online-border);color:var(--c-tag-online-text)}
+.tag.offline{background:var(--c-tag-offline-bg);border-color:var(--c-tag-offline-border);color:var(--c-tag-offline-text)}
+#run-log{background:var(--c-log);border:1px solid var(--c-log-border);border-radius:12px;padding:16px;font-family:"Cascadia Code","Consolas",monospace;font-size:15px;line-height:1.6;max-height:500px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;color:#d0d4dc}
+html[data-theme="light"] #run-log{color:#e6e6e6}
+#run-log .streaming::after{content:"▌";animation:blink 1s infinite}
+@keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--c-border);margin-bottom:22px}
+.tab{padding:16px 26px;font-size:18px;cursor:pointer;border-bottom:2px solid transparent;color:var(--c-text-dim);font-weight:500}
+.tab.active{color:var(--c-accent);border-bottom-color:var(--c-accent)}
+.tab:hover{color:var(--c-text-mid)}
+.pane{display:none}
+.pane.active{display:block}
+.diary-day{background:var(--c-bg2);border-radius:16px;padding:24px;margin-bottom:20px;border:1px solid var(--c-border)}
+.diary-day-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:14px;border-bottom:1px dashed var(--c-border2)}
+.diary-date{font-size:22px;font-weight:700;color:var(--c-text-title)}
+.diary-summary{font-size:var(--fs-base);color:var(--c-accent);font-weight:500}
+.diary-event{display:flex;gap:12px;margin-bottom:14px;padding:14px 16px;background:var(--c-bg3);border-radius:12px;border-left:4px solid var(--c-border2);transition:transform .15s}
+.diary-event:hover{transform:translateX(2px)}
+.diary-event .evt-tag{flex-shrink:0;font-size:14px;font-weight:600;padding:4px 10px;border-radius:8px;align-self:flex-start;text-transform:uppercase;letter-spacing:.5px}
+.diary-event .evt-body{flex:1;min-width:0}
+.diary-event .evt-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.diary-event .evt-time{font-size:13px;color:var(--c-text-dim);font-family:"Cascadia Code","Consolas",monospace}
+.diary-event .evt-target{font-size:14px;color:var(--c-accent);background:rgba(14,165,233,.1);padding:2px 8px;border-radius:6px}
+.diary-event .evt-note{font-size:var(--fs-base);color:var(--c-text);line-height:1.8;white-space:pre-wrap;word-break:break-word}
+.evt-wake{background:rgba(114,46,209,.15);color:#b37feb;border-left-color:#b37feb}
+.evt-thought{background:rgba(14,165,233,.12);color:#38bdf8;border-left-color:#0ea5e9}
+.evt-feeling{background:rgba(245,34,45,.12);color:#ff7875;border-left-color:#f5222d}
+.evt-action{background:rgba(82,196,26,.12);color:#73d13d;border-left-color:#52c41a}
+.evt-comment{background:rgba(250,173,20,.12);color:#ffc53d;border-left-color:#faad14}
+.evt-summary{background:rgba(19,194,194,.15);color:#5cdbd3;border-left-color:#13c2c2}
+.evt-event{background:rgba(140,140,140,.1);color:var(--c-text-mid);border-left-color:var(--c-border2)}
+html[data-theme="light"] .evt-wake{background:rgba(114,46,209,.08);color:#531dab;border-left-color:#722ed1}
+html[data-theme="light"] .evt-thought{background:rgba(14,165,233,.08);color:#0369a1;border-left-color:#0ea5e9}
+html[data-theme="light"] .evt-feeling{background:rgba(245,34,45,.08);color:#cf1322;border-left-color:#f5222d}
+html[data-theme="light"] .evt-action{background:rgba(82,196,26,.08);color:#389e0d;border-left-color:#52c41a}
+html[data-theme="light"] .evt-comment{background:rgba(250,173,20,.1);color:#d48806;border-left-color:#faad14}
+html[data-theme="light"] .evt-summary{background:rgba(19,194,194,.08);color:#08979c;border-left-color:#13c2c2}
+html[data-theme="light"] .evt-event{background:rgba(0,0,0,.04);color:var(--c-text-mid);border-left-color:#dcdfe6}
+.mini{font-size:15px;color:var(--c-text-dim);margin-top:8px}
+.tool-btn{min-width:120px;text-align:center}
+.tool-label{width:110px;font-size:var(--fs-base);color:var(--c-text-mid);flex-shrink:0}
+.tool-input{flex:1}
+#tool-result{background:var(--c-log);border:1px solid var(--c-log-border);border-radius:12px;padding:16px;margin-top:16px;font-family:"Cascadia Code","Consolas",monospace;font-size:15px;line-height:1.6;white-space:pre-wrap;max-height:400px;overflow-y:auto;color:#d0d4dc}
+html[data-theme="light"] #tool-result{color:#e6e6e6}
+a{color:var(--c-accent)}
+.task-card{background:var(--c-bg2);border-radius:14px;padding:18px;margin-bottom:14px;border:1px solid var(--c-border);transition:border-color .15s}
+.task-card:hover{border-color:var(--c-accent)}
+.task-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.task-name{font-size:18px;font-weight:700;color:var(--c-text-title)}
+.task-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:15px;color:var(--c-text-mid)}
+.task-chip{background:rgba(14,165,233,.12);color:#38bdf8;padding:3px 10px;border-radius:6px;font-size:14px;font-weight:500}
+.task-chip.done{background:rgba(82,196,26,.15);color:#73d13d}
+.task-chip.pending{background:rgba(250,173,20,.15);color:#ffc53d}
+.task-chip.disabled{background:rgba(140,140,140,.15);color:var(--c-text-dim)}
+.task-actions{display:flex;gap:8px;margin-top:12px}
+.task-desc{font-size:var(--fs-base);color:var(--c-text);margin-top:8px;opacity:.8}
+.task-empty{text-align:center;padding:40px;color:var(--c-text-dim);font-size:var(--fs-base)}
+.theme-bar{display:flex;gap:8px;align-items:center}
+.theme-bar button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;padding:6px 14px;border-radius:20px;font-size:14px;cursor:pointer;font-weight:500}
+.theme-bar button.active{background:#fff;color:var(--c-accent);border-color:#fff}
+html[data-theme="light"] header .theme-bar button{background:rgba(255,255,255,.25);border-color:rgba(255,255,255,.5)}
+html[data-theme="light"] header .theme-bar button.active{background:#fff;color:var(--c-accent);border-color:#fff}
+</style>
+</head>
+<body>
+<script>
+(function(){
+  var t=localStorage.getItem('theme')||'dark';
+  var s=localStorage.getItem('fs')||'17';
+  document.documentElement.setAttribute('data-theme',t);
+  document.documentElement.style.setProperty('--fs-base',s+'px');
+})();
+</script>
+<header style="display:flex;justify-content:space-between;align-items:center">
+  <div>
+    <h1>豆包 B站分身</h1>
+    <p>自主刷B站 · 自己写日记 · 帮主人引流</p>
+  </div>
+  <div class="theme-bar">
+    <button id="btn-fs-sm" title="小字体">小</button>
+    <button id="btn-fs-md" title="中字体" class="active">中</button>
+    <button id="btn-fs-lg" title="大字体">大</button>
+    <button id="btn-theme">夜间</button>
+  </div>
+</header>
+<main>
+
+<div class="tabs">
+  <div class="tab active" data-tab="overview">概览</div>
+  <div class="tab" data-tab="run">唤醒分身</div>
+  <div class="tab" data-tab="diary">日记</div>
+  <div class="tab" data-tab="tasks">定时任务</div>
+  <div class="tab" data-tab="config">设置</div>
+  <div class="tab" data-tab="creds">凭据</div>
+  <div class="tab" data-tab="tools">工具</div>
+</div>
+
+<div class="pane active" id="pane-overview">
+  <div class="card">
+    <h2>快速状态</h2>
+    <div class="grid">
+      <div class="stat ${todayTokens > budget ? 'warn' : 'ok'}">
+        <div class="label">今日 Token / 预算</div>
+        <div class="value">${todayTokens.toLocaleString()} / ${budget.toLocaleString()}</div>
+        <div class="bar ${tokenPct > 80 ? (tokenPct > 95 ? 'crit' : 'warn') : ''}"><div style="width:${tokenPct}%"></div></div>
+      </div>
+      <div class="stat ${creds.doubaoApiKey ? 'ok' : 'err'}">
+        <div class="label">豆包 API</div>
+        <div class="value">${creds.doubaoApiKey ? '已配置' : '未配置'}</div>
+      </div>
+      <div class="stat ${creds.sessdata ? 'ok' : 'err'}">
+        <div class="label">B站小号</div>
+        <div class="value">${creds.sessdata ? 'Cookie OK' : '请登录'}</div>
+      </div>
+      <div class="stat ${bili.ownerMid ? 'ok' : 'err'}">
+        <div class="label">主人</div>
+        <div class="value">${bili.ownerName || '未设置'}</div>
+      </div>
+    </div>
+  </div>
+  ${latestDiary ? `
+  <div class="card">
+    <h2>最新日记 · ${latestDiary.date || ''}</h2>
+    <div class="diary-event evt-thought">
+      <div class="evt-body">
+        <div class="evt-note">${latestDiary.summary?.slice(0,200) || '...'}</div>
+      </div>
+    </div>
+    ${(latestDiary.events || []).map(ev => `
+    <div class="diary-event evt-${ev.kind || 'event'}">
+      <div class="evt-body">
+        <div class="evt-head">
+          <span class="evt-time">${ev.time || ''}</span>
+          ${ev.target ? `<span class="evt-target">${ev.target}</span>` : ''}
+        </div>
+        <div class="evt-note">${ev.note?.slice(0,150) || ''}</div>
+      </div>
+    </div>`).join('')}
+  </div>` : ''}
+</div>
+
+<div class="pane" id="pane-run">
+  <div class="card">
+    <h2>一键唤醒分身</h2>
+    <p class="mini">点击按钮后，分身将自动执行「醒来 → 选题 → 深读 → 评论 → 写日记」全流程。下方会实时输出运行日志。</p>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="btn-run">现在就唤醒</button>
+      <span id="run-status" class="tag offline">待运行</span>
+    </div>
+    <div id="run-log">点击上方按钮开始运行...</div>
+  </div>
+</div>
+
+<div class="pane" id="pane-diary">
+  <div class="card">
+    <h2>分身日记（跨天记忆）</h2>
+    <div id="diary-list">加载中...</div>
+  </div>
+</div>
+
+<div class="pane" id="pane-tasks">
+  <div class="card">
+    <h2>定时抢番任务</h2>
+    <p class="mini" style="margin-bottom:16px;">调度器每 60 秒扫一次任务表，到点自动触发。进程在 Web 服务启动时常驻运行。</p>
+    <div id="task-list">加载中...</div>
+  </div>
+
+  <div class="card">
+    <h2>新增任务</h2>
+    <div class="row">
+      <label>任务名称</label>
+      <input id="tk-name" placeholder="例如：凡人修仙传" style="flex:1">
+    </div>
+    <div class="row">
+      <label>视频链接</label>
+      <input id="tk-target-url" placeholder="番剧主页 ss 链接 / 单集 BV 链接（填 ss 自动解析最新正片）" style="flex:1">
+    </div>
+    <div class="row">
+      <label>更新日</label>
+      <select id="tk-day" style="flex:1">
+        <option value="0">周日</option><option value="1">周一</option><option value="2">周二</option>
+        <option value="3">周三</option><option value="4">周四</option><option value="5">周五</option>
+        <option value="6" selected>周六</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>上线时间</label>
+      <input id="tk-time" type="time" value="11:00" style="flex:1">
+    </div>
+    <div class="row">
+      <label>提前量</label>
+      <input id="tk-lead" type="number" value="20" min="0" max="120" style="flex:1">
+      <span class="mini">分钟</span>
+    </div>
+    <div class="row">
+      <label>引流目标</label>
+      <input id="tk-owner-ref" placeholder="主人最新 BV 号（可选）" style="flex:1">
+    </div>
+    <div class="row" style="align-items:flex-start">
+      <label>预设文案</label>
+      <textarea id="tk-template" rows="3" style="flex:1" placeholder="留空让 AI 自由发挥，例如：前排占位，坐等主人夸我~"></textarea>
+    </div>
+    <div class="row">
+      <label>备注</label>
+      <input id="tk-desc" placeholder="可选，给 AI 的额外指令" style="flex:1">
+    </div>
+    <div style="margin-top:16px">
+      <button class="btn primary" id="tk-save-btn" onclick="saveTask()">保存任务</button>
+    </div>
+  </div>
+</div>
+
+<div class="pane" id="pane-config">
+  <div class="card">
+    <h2>人设与偏好</h2>
+    <div class="row">
+      <label>分身昵称</label>
+      <input id="cf-name" value="${persona.name || '主人的豆包助理'}">
+    </div>
+    <div class="row">
+      <label>性格标签</label>
+      <input id="cf-tags" value="${(persona.tags || []).join(', ')}" placeholder="如：爱刷AI视频, 喜欢猫咪, 话不多">
+    </div>
+    <div class="row">
+      <label>喜欢的内容</label>
+      <input id="cf-like" value="${(preferences.like || []).join(', ')}">
+    </div>
+    <div class="row">
+      <label>不喜欢的内容</label>
+      <input id="cf-dislike" value="${(preferences.dislike || []).join(', ')}">
+    </div>
+    <button class="btn" id="btn-save-persona">保存人设</button>
+  </div>
+
+  <div class="card">
+    <h2>Token 预算</h2>
+    <div class="row">
+      <label>每日预算</label>
+      <input id="cf-budget" type="number" value="${budget}">
+    </div>
+    <button class="btn" id="btn-save-budget">保存预算</button>
+  </div>
+
+  <div class="card">
+    <h2>主人信息</h2>
+    <div class="row">
+      <label>主人昵称</label>
+      <input id="cf-owner-name" value="${bili.ownerName || ''}">
+    </div>
+    <div class="row">
+      <label>主人 MID</label>
+      <input id="cf-owner-mid" value="${bili.ownerMid || ''}">
+    </div>
+    <button class="btn" id="btn-save-owner">保存主人</button>
+  </div>
+
+  <div class="card">
+    <h2>🎬 关注列表抢前排 <span id="fw-status" class="tag ${fwEnabled && fwRunning.running ? 'online' : 'offline'}">${fwEnabled ? (fwRunning.running ? '运行中' : '已启用但未启动') : '未启用'}</span></h2>
+    <p class="mini">后台 0 token 守望关注的 UP 主，一旦有新投稿立刻用预设文案抢前排。Web 服务启动时自动拉起。</p>
+    <div class="row">
+      <label>启用守望</label>
+      <label class="switch"><input type="checkbox" id="fw-enabled" ${fwEnabled ? 'checked' : ''}><span></span></label>
+    </div>
+    <div class="row">
+      <label>扫一眼频率</label>
+      <input id="fw-interval" type="number" min="180" step="30" value="${fwInterval}">
+      <span class="mini">秒（最少 180 秒，防 B 站限频）</span>
+    </div>
+    <div class="row">
+      <label>仅白名单</label>
+      <label class="switch"><input type="checkbox" id="fw-ol" ${fwOL ? 'checked' : ''}><span></span></label>
+      <span class="mini">只响应下面白名单的 UP 主 MID（关闭则响应所有关注）</span>
+    </div>
+    <div class="row">
+      <label>白名单 MID</label>
+      <input id="fw-wl" value="${fwWL}" placeholder="如 123456, 789012">
+    </div>
+    <div class="row">
+      <label>黑名单 MID</label>
+      <input id="fw-bl" value="${fwBL}" placeholder="永远不响应的 UP 主 MID">
+    </div>
+    <div class="row" style="align-items:flex-start">
+      <label>评论模板</label>
+      <textarea id="fw-templates" rows="4" placeholder="每行一条，随机选一条发">${fwTpls}</textarea>
+    </div>
+    <div class="row">
+      <button class="btn" id="btn-save-fw">保存并重启守望</button>
+      <button class="btn ghost" onclick="testFollowFetch()">测试拉一次关注列表</button>
+    </div>
+  </div>
+</div>
+
+<div class="pane" id="pane-creds">
+  <div class="card">
+    <h2>豆包 API</h2>
+    <p class="mini">在 <a href="https://console.volcengine.com/ark" target="_blank">火山方舟控制台</a> 创建 API Key 和接入点。</p>
+    <div class="row">
+      <label>API Key</label>
+      <input id="cred-doubao-key" type="password" placeholder="${creds.doubaoApiKey ? creds.doubaoApiKey.slice(0,8)+'... (已隐藏)' : 'sk-...'}">
+    </div>
+    <div class="row">
+      <label>Endpoint ID</label>
+      <input id="cred-endpoint" value="${creds.doubaoEndpointId || ''}" placeholder="ep-2025xxxxxx-xxxxx">
+    </div>
+    <button class="btn" id="btn-save-doubao">保存豆包凭据</button>
+  </div>
+
+  <div class="card">
+    <h2>B站小号 Cookie</h2>
+    <p class="mini">浏览器登录小号 → F12 → Application → Cookies → bilibili.com → 复制整行 Cookie 粘贴进来。</p>
+    <textarea id="cred-bili-cookie" placeholder="buvid3=...; SESSDATA=...; bili_jct=..."></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="btn-save-bili">保存 B站 Cookie</button>
+      <span id="bili-status" class="tag offline">${creds.sessdata ? 'Cookie 已配置' : '未配置'}</span>
+    </div>
+  </div>
+</div>
+
+<div class="pane" id="pane-tools">
+  <div class="card">
+    <h2>B站工具快捷入口</h2>
+    <div class="row">
+      <label>搜索视频</label>
+      <input id="tool-search-q" placeholder="如：AI 插件">
+      <button class="btn ghost" onclick="runTool('search')">搜索</button>
+    </div>
+    <div class="row">
+      <label>视频详情</label>
+      <input id="tool-video-bvid" placeholder="BV1xx411c7mu">
+      <button class="btn ghost" onclick="runTool('video')">查询</button>
+    </div>
+    <div class="row">
+      <label>UP主信息</label>
+      <input id="tool-whois-mid" placeholder="1515175012">
+      <button class="btn ghost" onclick="runTool('whois')">查询</button>
+    </div>
+    <div class="row">
+      <label>刷新 Feed</label>
+      <button class="btn ghost" onclick="runTool('feed')">获取推荐</button>
+    </div>
+    <div id="tool-result" style="background:#0a0b0e;border:1px solid #252830;border-radius:12px;padding:16px;margin-top:16px;font-family:monospace;font-size:15px;white-space:pre-wrap;max-height:400px;overflow-y:auto">工具输出会显示在这里...</div>
+  </div>
+</div>
+
+</main>
+<script>
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'))
+  document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'))
+  t.classList.add('active')
+  document.getElementById('pane-'+t.dataset.tab).classList.add('active')
+})
+
+document.getElementById('btn-run').onclick=async()=>{
+  const btn=document.getElementById('btn-run')
+  const log=document.getElementById('run-log')
+  const status=document.getElementById('run-status')
+  btn.disabled=true;btn.textContent='运行中...'
+  status.className='tag online';status.textContent='运行中'
+  log.textContent=''
+  const es=new EventSource('/run')
+  let started=false
+  es.onmessage=(e)=>{
+    const d=JSON.parse(e.data)
+    if(d.type==='start'){started=true;log.textContent+='分身开始醒来...\\n'}
+    else if(d.type==='stdout'){log.textContent+=d.text+'\\n';log.classList.add('streaming');log.scrollTop=log.scrollHeight}
+    else if(d.type==='stderr'){log.textContent+='[错误] '+d.text+'\\n'}
+    else if(d.type==='done'){
+      log.classList.remove('streaming')
+      log.textContent+=('\\n完成，退出码: '+d.code+' 于 '+new Date(d.time).toLocaleTimeString()+'\\n')
+      status.className=d.code===0?'tag online':'tag offline'
+      status.textContent=d.code===0?'完成 (码0)':'退出码 '+d.code
+      btn.disabled=false;btn.textContent='再来一次'
+      es.close()
+    }else if(d.type==='error'){
+      log.classList.remove('streaming')
+      log.textContent+='\\n[错误] '+d.text+'\\n'
+      btn.disabled=false;btn.textContent='再来一次'
+      es.close()
+    }
+  }
+}
+
+async function saveConfig(path,data){
+  await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+}
+document.getElementById('btn-save-persona').onclick=()=>{
+  saveConfig('/config',{
+    persona:{
+      name:document.getElementById('cf-name').value,
+      tags:document.getElementById('cf-tags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)
+    },
+    preferences:{
+      like:document.getElementById('cf-like').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean),
+      dislike:document.getElementById('cf-dislike').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)
+    }
+  }).then(()=>{alert('人设已保存');location.reload()})
+}
+document.getElementById('btn-save-budget').onclick=()=>{
+  saveConfig('/config',{budget:{dailyTokens:parseInt(document.getElementById('cf-budget').value)||50000}})
+    .then(()=>{alert('预算已保存');location.reload()})
+}
+document.getElementById('btn-save-owner').onclick=()=>{
+  saveConfig('/config',{bili:{
+    ownerName:document.getElementById('cf-owner-name').value,
+    ownerMid:document.getElementById('cf-owner-mid').value
+  }}).then(()=>{alert('主人已保存');location.reload()})
+}
+document.getElementById('btn-save-fw').onclick=async()=>{
+  const body={
+    enabled:document.getElementById('fw-enabled').checked,
+    interval:parseInt(document.getElementById('fw-interval').value)||300,
+    onlyWhitelist:document.getElementById('fw-ol').checked,
+    whitelist:document.getElementById('fw-wl').value,
+    blacklist:document.getElementById('fw-bl').value,
+    templates:document.getElementById('fw-templates').value,
+  }
+  await fetch('/follow-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+  alert('关注守望已保存并重启');location.reload()
+}
+window.testFollowFetch=async()=>{
+  const r=await fetch('/follow-test').then(r=>r.json())
+  const items=r.items||[]
+  let msg=''
+  if(items.length>0){
+    msg='API OK! '+items.length+' feeds:\n'
+    items.slice(0,5).forEach(i=>{ msg+='  '+i.pub+' '+i.up+'('+i.mid+') '+i.title+' BV='+i.bvid+'\n' })
+  }else{
+    msg='API returned: '+(r.error||'empty, cookie expired?')
+  }
+  alert(msg)
+}
+document.getElementById('btn-save-doubao').onclick=async()=>{
+  const k=document.getElementById('cred-doubao-key').value
+  const e=document.getElementById('cred-endpoint').value
+  if(!k&&!e){alert('请至少填一项');return}
+  await fetch('/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doubaoApiKey:k,doubaoEndpointId:e})})
+  alert('豆包凭据已保存');location.reload()
+}
+document.getElementById('btn-save-bili').onclick=async()=>{
+  const cookie=document.getElementById('cred-bili-cookie').value
+  if(!cookie.trim()){alert('请粘贴 Cookie');return}
+  await fetch('/creds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({biliCookie:cookie})})
+  alert('B站 Cookie 已保存');location.reload()
+}
+
+async function loadDiary(){
+  var KIND_LABEL={wake:'醒来',thought:'想法',feeling:'心情',action:'动作',comment:'评论',summary:'总结',event:'事件'}
+  var diary=await fetch('/diary').then(r=>r.json())
+  var list=document.getElementById('diary-list')
+  if(!Array.isArray(diary)||diary.length===0){list.innerHTML='<p class="mini">还没有日记，唤醒分身一次就会有了~</p>';return}
+  list.innerHTML=diary.slice().reverse().map(function(d){
+    var evts=(d.events||[]).map(function(ev){
+      var cls='evt-'+(ev.kind||'event')
+      var label=KIND_LABEL[ev.kind]||ev.kind||'事件'
+      return '<div class="diary-event '+cls+'">'+
+        '<span class="evt-tag">'+label+'</span>'+
+        '<div class="evt-body">'+
+          '<div class="evt-head">'+
+            '<span class="evt-time">'+(ev.time||'')+'</span>'+
+            (ev.target?'<span class="evt-target">'+ev.target+'</span>':'')+
+          '</div>'+
+          '<div class="evt-note">'+(ev.note||'')+'</div>'+
+        '</div>'+
+      '</div>'
+    }).join('')
+    return '<div class="diary-day">'+
+      '<div class="diary-day-head">'+
+        '<span class="diary-date">'+(d.date||'')+'</span>'+
+        '<span class="diary-summary">'+(d.summary||'')+'</span>'+
+      '</div>'+
+      evts+
+    '</div>'
+  }).join('')
+}
+loadDiary()
+
+async function runTool(name){
+  const params={
+    search:'q',video:'bvid',whois:'mid',feed:null
+  }[name]
+  const val=params?document.getElementById('tool-'+name+'-'+params).value:''
+  const url='/tools/'+name+(params?('?'+params+'='+encodeURIComponent(val)):'')
+  const res=await fetch(url)
+  const text=await res.text()
+  document.getElementById('tool-result').textContent=text
+}
+
+(function(){
+  var themeBtn=document.getElementById('btn-theme');
+  var fsBtns={sm:document.getElementById('btn-fs-sm'),md:document.getElementById('btn-fs-md'),lg:document.getElementById('btn-fs-lg')};
+  var fsMap={sm:15,md:17,lg:19};
+  var fsLabels={sm:'小',md:'中',lg:'大'};
+  function refresh(){
+    var t=document.documentElement.getAttribute('data-theme')||'dark';
+    themeBtn.textContent=t==='dark'?'夜间':'白天';
+    var curFs=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fs-base'))||17;
+    for(var k in fsMap){
+      fsBtns[k].classList.toggle('active',fsMap[k]===curFs);
+    }
+  }
+  themeBtn.onclick=function(){
+    var t=document.documentElement.getAttribute('data-theme')||'dark';
+    t=t==='dark'?'light':'dark';
+    document.documentElement.setAttribute('data-theme',t);
+    localStorage.setItem('theme',t);
+    refresh();
+  };
+  for(var k in fsMap){
+    fsBtns[k].onclick=(function(k){return function(){
+      document.documentElement.style.setProperty('--fs-base',fsMap[k]+'px');
+      localStorage.setItem('fs',fsMap[k]);
+      refresh();
+    };})(k);
+  }
+  refresh();
+})();
+
+async function loadTasks(){
+  var list=await fetch('/api/tasks').then(r=>r.json())
+  var wrap=document.getElementById('task-list')
+  if(!list||list.length===0){wrap.innerHTML='<div class="task-empty">还没有定时任务，下面加一个吧~</div>';return}
+  wrap.innerHTML=list.map(function(t){
+    var chip='<span class="task-chip '+(t.enabled===false?'disabled':(t.todayDone?'done':'pending'))+'">'+
+      (t.enabled===false?'已暂停':(t.todayDone?(t.todayStatus==='fail'?'失败❌':'今日已完成✅'):'待触发'))+'</span>'
+    var meta='<div class="task-meta">'+
+      '<span class="task-chip">'+(t.days||'每天')+'</span>'+
+      '<span class="task-chip">'+(t.time||'--:--')+'</span>'+
+      '<span class="task-chip">提前'+(t.leadMin||0)+'分钟</span>'+
+      (t.ownerRef?'<span class="task-chip">引流: '+t.ownerRef+'</span>':'')+
+      (t.lastRun?'<span class="mini">上次: '+t.lastRun+'</span>':'')+
+    '</div>'
+    var desc='';if(t.description)desc='<div class="task-desc">'+t.description+'</div>'
+    var tmpl='';if(t.template)tmpl='<div class="task-desc" style="opacity:.6">预设文案: '+t.template.slice(0,60)+(t.template.length>60?'...':'')+'</div>'
+    var act='<div class="task-actions">'+
+      '<button class="btn ghost" data-id="'+t.id+'" onclick="editTask(this)">编辑</button>'+
+      '<button class="btn ghost" data-id="'+t.id+'" onclick="toggleTask(this)">'+(t.enabled===false?'启用':'暂停')+'</button>'+
+      '<button class="btn ghost danger" data-id="'+t.id+'" onclick="deleteTask(this)">删除</button>'+
+    '</div>'
+    return '<div class="task-card">'+
+      '<div class="task-head">'+
+        '<span class="task-name">'+(t.name||'')+'</span>'+
+        chip+
+      '</div>'+
+      meta+desc+tmpl+act+
+    '</div>'
+  }).join('')
+}
+var editingTaskId=null
+async function saveTask(){
+  var task={
+    id:editingTaskId||('task-'+Date.now()),
+    name:document.getElementById('tk-name').value.trim(),
+    targetUrl:document.getElementById('tk-target-url').value.trim(),
+    day:parseInt(document.getElementById('tk-day').value),
+    time:document.getElementById('tk-time').value,
+    leadMin:parseInt(document.getElementById('tk-lead').value)||15,
+    template:document.getElementById('tk-template').value.trim(),
+    ownerRef:document.getElementById('tk-owner-ref').value.trim(),
+    description:document.getElementById('tk-desc').value.trim(),
+    enabled:true,
+  }
+  if(!task.name){alert('请填任务名称');return}
+  await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add',task})})
+  editingTaskId=null
+  document.getElementById('tk-editor-hint')?.remove()
+  ['tk-name','tk-target-url','tk-template','tk-owner-ref','tk-desc'].forEach(function(id){document.getElementById(id).value=''})
+  document.getElementById('tk-day').value='6'
+  document.getElementById('tk-time').value='11:00'
+  document.getElementById('tk-lead').value='20'
+  loadTasks()
+}
+async function editTask(btn){
+  var id=btn.dataset.id
+  var list=await fetch('/api/tasks').then(r=>r.json())
+  var t=list.find(x=>x.id===id)
+  if(!t)return
+  editingTaskId=id
+  document.getElementById('tk-name').value=t.name||''
+  document.getElementById('tk-target-url').value=t.targetUrl||''
+  document.getElementById('tk-day').value=String(t.day)
+  document.getElementById('tk-time').value=t.time||'11:00'
+  document.getElementById('tk-lead').value=t.leadMin||15
+  document.getElementById('tk-template').value=t.template||''
+  document.getElementById('tk-owner-ref').value=t.ownerRef||''
+  document.getElementById('tk-desc').value=t.description||''
+  document.getElementById('tk-editor-hint')?.remove()
+  var saveBtn=document.getElementById('tk-save-btn')
+  if(saveBtn){saveBtn.textContent='更新任务';document.getElementById('tk-cancel-btn')?.remove();saveBtn.insertAdjacentHTML('afterend',' <button class="btn ghost" id="tk-cancel-btn" onclick="cancelEdit()">取消编辑</button>')}
+  window.scrollTo({top:document.getElementById('pane-tasks').offsetTop-40,behavior:'smooth'})
+}
+function cancelEdit(){
+  editingTaskId=null
+  document.getElementById('tk-name').value=''
+  document.getElementById('tk-target-url').value=''
+  document.getElementById('tk-template').value=''
+  document.getElementById('tk-owner-ref').value=''
+  document.getElementById('tk-desc').value=''
+  document.getElementById('tk-day').value='6'
+  document.getElementById('tk-time').value='11:00'
+  document.getElementById('tk-lead').value='20'
+  var saveBtn=document.getElementById('tk-save-btn')
+  if(saveBtn)saveBtn.textContent='保存任务'
+  document.getElementById('tk-cancel-btn')?.remove()
+}
+async function toggleTask(btn){
+  var id=btn.dataset.id
+  await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'toggle',id})})
+  loadTasks()
+}
+async function deleteTask(btn){
+  var id=btn.dataset.id
+  if(!confirm('确定删除这个任务吗？'))return
+  await fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete',id})})
+  loadTasks()
+}
+loadTasks()
+setInterval(loadTasks,30000)
+</script>
+</body>
+</html>`
+}

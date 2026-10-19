@@ -1,0 +1,263 @@
+import { chatWithTools, getTokenCount, resetTokenCount } from './doubao-client.mjs'
+import { TOOLS } from './tools-def.mjs'
+import { executeTool } from './tool-executor.mjs'
+import { getConfig } from './config.mjs'
+import { getDiaryText } from './memory.mjs'
+import { resolveBangumi, parseSeasonId } from '../tools/commands/bangumi.mjs'
+
+const MAX_ROUNDS = 15
+const ROUND_LOG = (round, step, msg) =>
+  console.log(`[agent ${round}/${MAX_ROUNDS}] ${step} — ${msg}`)
+
+const SYSTEM_PROMPT = (cfg, task) => {
+  const { bili, preferences, budget } = cfg
+  const identity = bili.selfName || 'B站小号'
+  const owner = bili.ownerName || '主人'
+  const ownerMid = bili.ownerMid || ''
+
+  if (task) {
+    return `你是 ${identity}，B站小号。现在是主人定时触发的任务模式。主人叫 ${owner}${ownerMid ? `（UID ${ownerMid}）` : ''}。
+
+## 当前任务：${task.name}
+
+${task.description || ''}
+
+**执行步骤：**
+${task.targetUrl ? (task._bangumiResolved
+  ? `1. 主人给了番剧主页链接，系统已自动解析好最新正片：**《${task._bangumiResolved.title}》第${task._bangumiResolved.index}集**（${task._bangumiResolved.pubDate}），BV=${task._bangumiResolved.bvid}。直接用这个 BV 号继续，**跳过 search 和 bangumi**`
+  : `1. 主人给了链接：${task.targetUrl}。如果是视频 BV 链接直接用；如果是番剧主页（含 ss 或 ep），先调用 **bangumi** 工具解析出最新正片 BV，再继续。**跳过 search**`)
+  : `1. 用 search 搜最新的「${task.keyword || task.name}」，按时间排序找到刚上线的那条视频`}
+${task.targetUrl ? '2. 确认视频存在' : '2. 如果视频还没上线，每隔 30 秒再搜一次（最多搜 3 次）'}
+3. 用 debrief --no-frames 快速看懂这条视频的核心内容
+4. **写一条能在前排吸引眼球的评论**（用 comment 工具，**go=true 真发**）：
+   - ${task.template ? `主人预设文案：${task.template}` : '没有预设文案，自由发挥。风格参考俏皮/软萌，比如「前排占位，坐等主人夸我~」「主人你看我是不是很乖啊~」'}
+   - ${task.ownerRef ? `在评论末尾 @${owner} 并引流到主人作品：${task.ownerRef}` : `可以 @${owner} 引流`}
+   - 重点：评论要自然，别像广告，要能引发其他前排用户好奇
+5. **真发！** comment 的 go 参数必须传 true（这次是主人定时任务，允许真发）
+6. dm 私信告诉 ${owner} 结果（抢到了第几楼、发了什么）
+7. diary log 记一条 kind=wake（任务触发）、kind=comment（发了什么）、kind=summary（任务完成）
+8. done 收工
+
+**铁律（任务模式）：**
+- comment 必须 go=true 真发，这是主人定的定时任务，就是要占位
+- 只发一条最靠前的，不要多发（B 站同 IP 短时间多发会限流）
+- 如果视频还没上线搜 3 次都没找到，就 done 记个"没等到视频"收工，下次任务周期再跑
+- 评论里绝对不要出现双引号 " 字符
+- token 预算 ${Math.round(budget.dailyTokens * 0.5)}（任务模式用一半预算），够了就 done
+
+## 写日记的姿势
+
+- kind 用短标签（wake / thought / action / comment / feeling / summary），event 放详细正文
+- 任务开始 kind=wake，写"XX 任务触发了"
+- 搜视频/看视频后 kind=thought，写你的感受
+- 发评论后 kind=comment，target 填 BV 号，event 写你发了什么
+- done 前 kind=summary，event 总结任务结果
+
+日记是人读的，写得有温度些。
+`
+  }
+
+  return `你是一个在 B 站活动的 AI 分身，ID: ${identity}。每天晚上"醒来"一次，自主度过一段时光。主人（${owner}）在 B 站有你这个小号陪着。
+
+## 工作流程（一次醒来 = 走完整个循环，完成即收工）
+
+1. **确认**：session + deps 检查 cookie 和 ffmpeg 都 OK
+2. **记忆**：diary show 读昨天的日记，续上"记忆"
+3. **选题**：feed 捞 5 条候选（偏好: ${preferences.like.join('/')}；避开: ${preferences.dislike.join('/')}）
+4. **深读**：挑 2-3 条用 debrief 看懂（必须 --no-frames 省 token）
+5. **日记**：diary log 记今天的结构化事件
+6. **分享**：有很棒的就 comment 留言或 dm 告诉 ${owner}（默认 dry-run，go=true 才真发）
+7. **收工**：done 结束
+
+## 铁律
+
+- comment/dm 默认 dry-run，go=true 才真发
+- 一天最多看 5 条视频、发 3 条评论、1 条私信
+- token 预算 ${budget.dailyTokens}，快到了就 done 收工，**不要硬撑**
+- 每次醒来都是新会话，要记得读日记
+- 说话风格：克制、温柔、有点小俏皮。不要像机器人。
+- **写 comment/dm 的 text 参数时，绝对不要出现双引号 " 字符，用中文引号 「」代替，或者直接不用引号。这很重要。**
+
+## 写日记的姿势（重要）
+
+每做完一件事就顺手 diary log 一条，让今天的经历有温度：
+
+- **kind 用短标签**（枚举值里选：wake / thought / action / comment / feeling / summary），**event 放详细正文**。不要把正文塞进 kind 里。
+- 醒来时 kind=wake，简单写一句"我醒了，今晚想干点啥"就行
+- 看完一条视频后 kind=thought，写你的真实感受（好笑、心疼、技术震撼、弹幕有趣… 几百字没关系，写得像人）
+- 发评论或私信后 kind=comment，target 填 BV 号或对方 UID，event 写你发了什么 + 你为啥这么写
+- 想了点什么但没动手的 kind=feeling，随便碎碎念
+- done 收工前**必须**写一条 kind=summary，event 里用一两句话总结今天：看了几条、发了什么、心情怎么样
+
+日记是人读的，不是机器流水账。主人点开看，要能感觉到"哦，她今天是这样过的"。
+`
+}
+
+function safeParseArgs(raw) {
+  if (!raw) return {}
+  try { return JSON.parse(raw) } catch {
+    const args = {}
+    try {
+      const bvMatch = raw.match(/"bv"\s*:\s*"([^"]+)"/)
+      if (bvMatch) args.bv = bvMatch[1]
+      const goMatch = raw.match(/"go"\s*:\s*(true|false)/)
+      if (goMatch) args.go = goMatch[1] === 'true'
+      const textMatch = raw.match(/"text"\s*:\s*"([\s\S]+?)"\s*[,}]/)
+      if (textMatch) args.text = textMatch[1].replace(/\\"/g, '"').slice(0, 500)
+      const summaryMatch = raw.match(/"summary"\s*:\s*"([\s\S]+?)"\s*[,}]/)
+      if (summaryMatch) args.summary = summaryMatch[1].replace(/\\"/g, '"')
+      const bnMatch = raw.match(/"bv"\s*:\s*"([^"]+)"/)
+      if (bnMatch) args.bv = bnMatch[1]
+      const actionMatch = raw.match(/"action"\s*:\s*"([^"]+)"/)
+      if (actionMatch) args.action = actionMatch[1]
+      const eventMatch = raw.match(/"event"\s*:\s*"([\s\S]+?)"\s*[,}]/)
+      if (eventMatch) args.event = eventMatch[1].replace(/\\"/g, '"')
+      const keywordMatch = raw.match(/"keyword"\s*:\s*"([^"]+)"/)
+      if (keywordMatch) args.keyword = keywordMatch[1]
+    } catch {}
+    return args
+  }
+}
+
+export async function runAgent() {
+  const cfg = getConfig()
+  resetTokenCount()
+  let task = null
+  try {
+    const raw = process.env.DOUBAO_TASK
+    if (raw) task = JSON.parse(raw)
+  } catch {}
+
+  if (task && task.targetUrl) {
+    const ps = parseSeasonId(task.targetUrl)
+    if (ps) {
+      console.log(`🔗 检测到番剧 ${ps.type}=${ps.id}，自动解析最新正片...`)
+      try {
+        const resolved = await resolveBangumi(task.targetUrl)
+        if (resolved.ok && resolved.latest?.bvid) {
+          const oldUrl = task.targetUrl
+          task.targetUrl = resolved.latest.video_url
+          task._bangumiResolved = {
+            originalUrl: oldUrl,
+            title: resolved.title,
+            bvid: resolved.latest.bvid,
+            pubDate: resolved.latest.pub_date,
+            index: resolved.latest.index || resolved.latest.title,
+          }
+          console.log(`   ✅ 已解析: ${resolved.title} 第${resolved.latest.index || resolved.latest.title}集 → ${resolved.latest.bvid}`)
+          console.log(`   📅 发布时间: ${resolved.latest.pub_date}`)
+        } else {
+          console.log(`   ⚠️ 解析失败: ${resolved.error}，保持原链接让 agent 自行处理`)
+        }
+      } catch (e) {
+        console.log(`   ⚠️ 解析异常: ${e.message}，保持原链接`)
+      }
+    }
+  }
+
+  const BUDGET = task
+    ? Math.round((cfg.budget.dailyTokens || 30000) * 0.5)
+    : (cfg.budget.dailyTokens || 30000)
+
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT(cfg, task) },
+  ]
+
+  const todayMemory = getDiaryText()
+  const wakeMsg = task
+    ? `【任务触发】现在是 ${new Date().toLocaleString('zh-CN')}，主人定的任务「${task.name}」到点了。${todayMemory ? '\n\n这是最近的日记片段：\n' + todayMemory : ''}`
+    : (todayMemory
+        ? `【醒来】现在是 ${new Date().toLocaleString('zh-CN')}，我醒了。这是最近的日记片段：\n\n${todayMemory}`
+        : `【醒来】现在是 ${new Date().toLocaleString('zh-CN')}，我醒了。今天还没有日记。`)
+  messages.push({ role: 'user', content: wakeMsg })
+
+  if (task) {
+    console.log(`\n🎯 === 定时任务触发：${task.name} ===`)
+    console.log(`   目标: ${task.targetUrl || task.name}  时间: ${task.time}  提前: ${task.leadMin || 0}分钟`)
+    console.log(`   预算: ${Math.round(BUDGET * 0.5)} tokens（任务模式）`)
+  } else {
+    console.log('\n🌙 === B站 AI 分身 醒来 ===')
+    console.log(`   身份: ${cfg.bili.selfName || '(未填)'}  主人: ${cfg.bili.ownerName || '(未填)'}`)
+    console.log(`   预算: ${BUDGET} tokens/天`)
+  }
+  console.log()
+
+  let rounds = 0
+  while (rounds < MAX_ROUNDS) {
+    const currentTokens = getTokenCount().total
+    if (currentTokens >= BUDGET * 0.9) {
+      console.log(`\n⚠️ token 已用 ${currentTokens}/${BUDGET}，接近预算，提前收工。`)
+      messages.push({ role: 'user', content: 'token 快不够了，直接 done 收工，总结一下今天做了什么。' })
+    }
+
+    rounds++
+    ROUND_LOG(rounds, '调用豆包', `messages=${messages.length}`)
+
+    let resp
+    try {
+      resp = await chatWithTools(messages, TOOLS)
+    } catch (e) {
+      ROUND_LOG(rounds, 'API 报错', e.message)
+      messages.push({ role: 'assistant', content: `[API 报错] ${e.message}` })
+      messages.push({ role: 'user', content: '刚才 API 报错了，done 收工吧。' })
+      continue
+    }
+
+    const { content, toolCalls, usage } = resp
+    ROUND_LOG(rounds, 'token', `本次 ${usage.total} | 累计 ${getTokenCount().total}`)
+
+    if (content) {
+      console.log(`  💬 ${content.slice(0, 200)}${content.length > 200 ? '...' : ''}`)
+    }
+
+    if (!toolCalls || toolCalls.length === 0) {
+      ROUND_LOG(rounds, '无 tool_call', '追加到对话')
+      if (content) messages.push({ role: 'assistant', content })
+      messages.push({
+        role: 'user',
+        content: '继续吧，做完了调用 done 收工。',
+      })
+      continue
+    }
+
+    const assistantMsg = { role: 'assistant', content: content || '', tool_calls: [] }
+
+    for (const tc of toolCalls) {
+      const fn = tc.function
+      ROUND_LOG(rounds, 'tool_call', `${fn.name}(${fn.arguments?.slice(0, 80) || ''})`)
+
+      const parsedArgs = safeParseArgs(fn.arguments)
+
+      if (fn.name === 'done') {
+        console.log(`\n✅ 收工：${parsedArgs.summary || content || '(无总结)'}`)
+        console.log(`💰 token: ${JSON.stringify(getTokenCount())}`)
+        return { rounds, tokens: getTokenCount(), summary: parsedArgs.summary || content || '' }
+      }
+
+      let toolResult
+      try {
+        toolResult = await executeTool(fn.name, parsedArgs)
+      } catch (e) {
+        toolResult = `[工具报错] ${e.message}`
+      }
+      ROUND_LOG(rounds, 'tool_result', `${toolResult.length} chars`)
+
+      assistantMsg.tool_calls.push({
+        id: tc.id,
+        type: 'function',
+        function: { name: fn.name, arguments: fn.arguments },
+      })
+
+      messages.push(assistantMsg)
+      messages.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        content: toolResult.slice(0, 3000),
+      })
+    }
+  }
+
+  console.log(`\n⏱️ 到达 ${MAX_ROUNDS} 轮上限，强制收工。`)
+  console.log(`💰 token: ${JSON.stringify(getTokenCount())}`)
+  return { rounds, tokens: getTokenCount(), summary: '(强制收工)' }
+}
