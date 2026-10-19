@@ -185,6 +185,23 @@ new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false })
 ```
 匹配 title 或 index_title，同时过滤 `pub_time === 0` 的未上线集数。
 
+### 4.5 终端进程管理（IDE 崩溃元凶）
+
+**AI 工程师（Trae / Kimi / Cursor）务必遵守**：
+
+> 每次通过 RunCommand 打开后台进程（`node web.mjs`、follow-await.mjs、临时测试脚本等），**必须在任务结束后立即 StopCommand 或 taskkill 关掉它**。
+
+典型崩溃场景：
+- 开了 5 个终端，每个都跑着 node 进程 → 内存被吃光 → IDE OOM 崩溃
+- 旧的 `node web.mjs` 没关 → 新的 bind 7890 端口失败 → "EADDRINUSE" → 误以为代码有 bug 浪费时间排查
+- 多个终端同时占着资源 → 任何一个异常退出都可能拖垮其他
+
+**开终端 checklist**：
+- [ ] 启动前台短命令（node --check、curl、grep）：执行完自然退出，不用管
+- [ ] 启动后台长进程（node web.mjs、node follow-await.mjs）：**完成任务后必须 StopCommand**
+- [ ] 重新跑 web.mjs / scheduler 之前：先 `taskkill /F /IM node.exe` 清干净旧进程
+- [ ] IDE 报错 "端口被占用"：先 kill 再想别的，不要猜
+
 ---
 
 ## 5. 快速同步脚本（可选，加到 PowerShell Profile）
