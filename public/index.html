@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>豆包 B站分身 · 控制台</title>
+<link rel="stylesheet" href="styles.css">
+<script>
+(function(){
+  var t=localStorage.getItem('theme')||'dark';
+  var s=localStorage.getItem('fs')||'19';
+  document.documentElement.setAttribute('data-theme',t);
+  document.documentElement.style.setProperty('--fs-base',s+'px');
+})();
+</script>
+</head>
+<body>
+<header style="display:flex;justify-content:space-between;align-items:center">
+  <div>
+    <h1>豆包 B站分身 <span class="ver-badge" id="ver-badge">v0.0.0</span></h1>
+    <p>自主刷B站 · 自己写日记 · 帮用户引流</p>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+    <div style="display:flex;gap:8px;align-items:center">
+      <button onclick="testCreds()" id="btn-test-creds" style="padding:6px 14px;background:#52c41a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px">🔗 测试凭据</button>
+      <button onclick="abortAgent()" id="btn-abort" style="padding:6px 14px;background:#ff4d4f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px">🛑 中止AI</button>
+      <button onclick="showTrajectory()" style="padding:6px 14px;background:#1890ff;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px">📋 查看轨迹</button>
+      <span id="creds-test-result" style="margin-left:6px;font-size:13px;vertical-align:middle;color:#c9d1d9"></span>
+    </div>
+    <div class="theme-bar">
+      <button id="btn-fs-sm" title="小字体">小</button>
+      <button id="btn-fs-md" title="中字体" class="active">中</button>
+      <button id="btn-fs-lg" title="大字体">大</button>
+      <button id="btn-theme" title="切换明/暗模式">🌙</button>
+    </div>
+  </div>
+</header>
+<main>
+
+<div class="tabs">
+  <div class="tab active" data-tab="overview">概览</div>
+  <div class="tab" data-tab="run">唤醒分身</div>
+  <div class="tab" data-tab="diary">日记</div>
+  <div class="tab" data-tab="tasks">定时任务</div>
+  <div class="tab" data-tab="config">设置</div>
+  <div class="tab" data-tab="creds">凭据</div>
+  <div class="tab" data-tab="tools">工具</div>
+</div>
+
+<div class="pane active" id="pane-overview">
+  <div class="card">
+    <h2>快速状态</h2>
+    <div class="grid">
+      <div class="stat clickable" id="stat-tokens" onclick="showTokenChart()" title="点击查看消耗趋势">
+        <div class="label">今日 Token / 预算 <span class="hint-link">📈</span></div>
+        <div class="value" id="stat-tokens-value">-- / --</div>
+        <div class="bar" id="stat-tokens-bar"><div style="width:0%"></div></div>
+      </div>
+      <div class="stat" id="stat-doubao">
+        <div class="label">豆包 API</div>
+        <div class="value" id="stat-doubao-value">加载中...</div>
+      </div>
+      <div class="stat" id="stat-bili">
+        <div class="label">B站小号</div>
+        <div class="value" id="stat-bili-value">加载中...</div>
+      </div>
+      <div class="stat" id="stat-user">
+        <div class="label">用户</div>
+        <div class="value" id="stat-user-value">加载中...</div>
+      </div>
+    </div>
+  </div>
+  <div class="card" id="latest-diary-card" style="display:none">
+    <h2 id="latest-diary-title">最新日记</h2>
+    <div id="latest-diary-body"></div>
+  </div>
+</div>
+
+<div class="pane" id="pane-run">
+  <div class="card">
+    <h2>一键唤醒分身</h2>
+    <p class="mini">点击按钮后，分身将自动执行「醒来 → 选题 → 深读 → 评论 → 写日记」全流程。下方会实时输出运行日志。</p>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="btn-run">现在就唤醒</button>
+      <span id="run-status" class="tag offline">待运行</span>
+    </div>
+    <div id="run-log">点击上方按钮开始运行...</div>
+  </div>
+</div>
+
+<div class="pane" id="pane-diary">
+  <div class="card">
+    <h2>分身日记（跨天记忆）</h2>
+    <div id="diary-list">加载中...</div>
+  </div>
+</div>
+
+<div class="pane" id="pane-tasks">
+  <div class="card">
+    <h2>定时抢番任务</h2>
+    <p class="mini" style="margin-bottom:16px;">调度器每 60 秒扫一次任务表，到点自动触发。进程在 Web 服务启动时常驻运行。</p>
+    <div id="task-list">加载中...</div>
+  </div>
+
+  <div class="card">
+    <h2>新增任务</h2>
+    <div class="row">
+      <label>任务名称</label>
+      <input id="tk-name" placeholder="例如：凡人修仙传" style="flex:1">
+    </div>
+    <div class="row">
+      <label>视频链接</label>
+      <input id="tk-target-url" placeholder="番剧主页 ss 链接 / 单集 BV 链接（填 ss 自动解析最新正片）" style="flex:1">
+    </div>
+    <div class="row">
+      <label>更新日</label>
+      <select id="tk-day" style="flex:1">
+        <option value="0">周日</option><option value="1">周一</option><option value="2">周二</option>
+        <option value="3">周三</option><option value="4">周四</option><option value="5">周五</option>
+        <option value="6" selected>周六</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>上线时间</label>
+      <input id="tk-time" type="time" value="11:00" style="flex:1">
+    </div>
+    <div class="row">
+      <label>提前量</label>
+      <input id="tk-lead" type="number" value="20" min="0" max="120" style="flex:1">
+      <span class="mini">分钟</span>
+    </div>
+    <div class="row">
+      <label>关联视频</label>
+      <input id="tk-owner-ref" placeholder="可选：引流用的 BV 号" style="flex:1">
+    </div>
+    <div class="row" style="align-items:flex-start">
+      <label>预设文案</label>
+      <textarea id="tk-template" rows="3" style="flex:1" placeholder="留空让 AI 自由发挥，例如：前排占位，等 UP 主翻牌~"></textarea>
+    </div>
+    <div class="row">
+      <label>备注</label>
+      <input id="tk-desc" placeholder="可选，给 AI 的额外指令" style="flex:1">
+    </div>
+    <div style="margin-top:16px">
+      <button class="btn primary" id="tk-save-btn" onclick="saveTask()">保存任务</button>
+    </div>
+  </div>
+</div>
+
+<div class="pane" id="pane-config">
+  <div class="card">
+    <h2>人设与偏好</h2>
+    <div class="row">
+      <label>分身昵称</label>
+      <input id="cf-name" value="">
+    </div>
+    <div class="row">
+      <label>性格标签</label>
+      <input id="cf-tags" value="" placeholder="如：爱刷AI视频, 喜欢猫咪, 话不多">
+    </div>
+    <div class="row">
+      <label>喜欢的内容</label>
+      <input id="cf-like" value="">
+    </div>
+    <div class="row">
+      <label>不喜欢的内容</label>
+      <input id="cf-dislike" value="">
+    </div>
+    <button class="btn" id="btn-save-persona">保存人设</button>
+  </div>
+
+  <div class="card">
+    <h2>Token 预算</h2>
+    <div class="row">
+      <label>每日预算</label>
+      <input id="cf-budget" type="number" value="">
+    </div>
+    <button class="btn" id="btn-save-budget">保存预算</button>
+  </div>
+
+  <div class="card">
+    <h2>用户信息</h2>
+    <div class="row">
+      <label>B 站昵称</label>
+      <input id="cf-owner-name" value="">
+    </div>
+    <div class="row">
+      <label>B 站 UID</label>
+      <input id="cf-owner-mid" value="">
+    </div>
+    <button class="btn" id="btn-save-owner">保存用户信息</button>
+  </div>
+
+  <div class="card">
+    <h2>🎬 关注列表抢前排 <span id="fw-status" class="tag offline">加载中</span></h2>
+    <p class="mini">后台 0 token 守望关注的 UP 主，一旦有新投稿立刻用预设文案抢前排。Web 服务启动时自动拉起。</p>
+    <div class="row">
+      <label>启用守望</label>
+      <label class="switch"><input type="checkbox" id="fw-enabled"><span></span></label>
+    </div>
+    <div class="row">
+      <label>扫一眼频率</label>
+      <input id="fw-interval" type="number" min="180" step="30" value="">
+      <span class="mini">秒（最少 180 秒，防 B 站限频）</span>
+    </div>
+    <div class="row">
+      <label>仅白名单</label>
+      <label class="switch"><input type="checkbox" id="fw-ol"><span></span></label>
+      <span class="mini">只响应下面白名单的 UP 主 MID（关闭则响应所有关注）</span>
+    </div>
+    <div class="row">
+      <label>白名单 MID</label>
+      <input id="fw-wl" value="" placeholder="如 123456, 789012">
+    </div>
+    <div class="row">
+      <label>黑名单 MID</label>
+      <input id="fw-bl" value="" placeholder="永远不响应的 UP 主 MID">
+    </div>
+    <div class="row" style="align-items:flex-start">
+      <label>评论模板</label>
+      <textarea id="fw-templates" rows="4" placeholder="每行一条，随机选一条发"></textarea>
+    </div>
+    <div class="row">
+      <button class="btn" id="btn-save-fw">保存并重启守望</button>
+      <button class="btn ghost" onclick="testFollowFetch()">测试拉一次关注列表</button>
+    </div>
+  </div>
+</div>
+
+<div class="pane" id="pane-creds">
+  <div class="card">
+    <h2>豆包 API</h2>
+    <p class="mini">在 <a href="https://console.volcengine.com/ark" target="_blank">火山方舟控制台</a> 创建 API Key 和接入点。</p>
+    <div class="row">
+      <label>API Key</label>
+      <input id="cred-doubao-key" type="password" placeholder="sk-... （粘贴后自动隐藏）">
+    </div>
+    <div class="row">
+      <label>Endpoint ID</label>
+      <input id="cred-endpoint" value="" placeholder="ep-2025xxxxxx-xxxxx">
+    </div>
+    <button class="btn" id="btn-save-doubao">保存豆包凭据</button>
+  </div>
+
+  <div class="card">
+    <h2>B站小号 Cookie</h2>
+    <p class="mini">浏览器登录小号 → F12 → Application → Cookies → bilibili.com → 复制整行 Cookie 粘贴进来。</p>
+    <textarea id="cred-bili-cookie" placeholder="buvid3=...; SESSDATA=...; bili_jct=..."></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="btn-save-bili">保存 B站 Cookie</button>
+      <span id="bili-status" class="tag offline">未配置</span>
+    </div>
+  </div>
+</div>
+
+<div class="pane" id="pane-tools">
+  <div class="card">
+    <h2>B站工具快捷入口</h2>
+    <div class="row">
+      <label>搜索视频</label>
+      <input id="tool-search-q" placeholder="如：AI 插件">
+      <button class="btn ghost" onclick="runTool('search')">搜索</button>
+    </div>
+    <div class="row">
+      <label>视频详情</label>
+      <input id="tool-video-bvid" placeholder="BV1xx411c7mu">
+      <button class="btn ghost" onclick="runTool('video')">查询</button>
+    </div>
+    <div class="row">
+      <label>UP主信息</label>
+      <input id="tool-whois-mid" placeholder="1515175012">
+      <button class="btn ghost" onclick="runTool('whois')">查询</button>
+    </div>
+    <div class="row">
+      <label>刷新 Feed</label>
+      <button class="btn ghost" onclick="runTool('feed')">获取推荐</button>
+    </div>
+    <div id="tool-result" style="background:#0a0b0e;border:1px solid #252830;border-radius:12px;padding:16px;margin-top:16px;font-family:monospace;font-size:15px;white-space:pre-wrap;max-height:400px;overflow-y:auto">工具输出会显示在这里...</div>
+  </div>
+</div>
+
+</main>
+<div id="token-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeTokenChart()">
+  <div class="modal-box">
+    <h3>Token 消耗趋势 <button class="close-btn" onclick="closeTokenChart()">×</button></h3>
+    <div id="token-chart-content">加载中...</div>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+diff --git a/src/web.mjs b/src/web.mjs
+index fe83dd2..9c0ac24 100644
+--- a/src/web.mjs
++++ b/src/web.mjs
+@@ -13,9 +13,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
+ function resolveDataDir() {
+   const candidates = [
+     path.join(os.homedir(), '.doubao-bot'),
+-    'C:\\Users\\Administrator\\.doubao-bot',
+-    'C:\\Users\\admin\\.doubao-bot',
+-    'C:\\root\\.doubao-bot',
++    'C:\Users\Administrator\.doubao-bot',
++    'C:\Users\admin\.doubao-bot',
++    'C:\root\.doubao-bot',
+     '/root/.doubao-bot',
+     path.join(process.cwd(), '.doubao-bot'),
+   ]
+@@ -31,9 +31,9 @@ function resolveDataDir() {
+ 
+ const REAL_USER_HOMEDIR = (() => {
+   const candidates = [
+-    'C:\\Users\\Administrator',
+-    'C:\\Users\\admin',
+-    'C:\\root',
++    'C:\Users\Administrator',
++    'C:\Users\admin',
++    'C:\root',
+     '/root',
+   ]
+   for (const h of candidates) {
+@@ -66,10 +66,10 @@ function findFile(candidates) {
+ function readWhaleLog() {
+   const candidates = [
+     path.join(os.homedir(), '.dsh', 'whale-log.jsonl'),
+-    'C:\\Users\\Administrator\\.dsh\\whale-log.jsonl',
+-    'C:\\Users\\admin\\.dsh\\whale-log.jsonl',
+-    'C:\\root\\.dsh\\whale-log.jsonl',
+-    'C:\\WINDOWS\\system32\\config\\systemprofile\\.dsh\\whale-log.jsonl',
++    'C:\Users\Administrator\.dsh\whale-log.jsonl',
++    'C:\Users\admin\.dsh\whale-log.jsonl',
++    'C:\root\.dsh\whale-log.jsonl',
++    'C:\WINDOWS\system32\config\systemprofile\.dsh\whale-log.jsonl',
+     path.join(process.cwd(), '.dsh', 'whale-log.jsonl'),
+     '/root/.dsh/whale-log.jsonl',
+   ]
+@@ -210,7 +210,7 @@ async function api(req, res, pathname) {
+ 
+   if (pathname === '/api/abort' && req.method === 'POST') {
+     const REAL_USER_HOMEDIR = (() => {
+-      const cands = ['C:\\Users\\Administrator', 'C:\\Users\\admin', process.env.USERPROFILE || '']
++      const cands = ['C:\Users\Administrator', 'C:\Users\admin', process.env.USERPROFILE || '']
+       for (const h of cands) { try { if (h && fs.existsSync(path.join(h, '.doubao-bot', 'credentials.json'))) return h } catch {} }
+       return process.env.USERPROFILE || '.'
+     })()
+@@ -394,9 +394,9 @@ async function api(req, res, pathname) {
+       path.join(os.homedir(), '.doubao-bot', 'credentials.json'),
+       path.join(os.homedir(), '.doubao-bot', 'config.json'),
+       path.join(os.homedir(), '.bili-ai', 'credentials.json'),
+-      'C:\\Users\\Administrator\\.doubao-bot\\credentials.json',
+-      'C:\\Users\\Administrator\\.doubao-bot\\config.json',
+-      'C:\\Users\\Administrator\\.bili-ai\\credentials.json',
++      'C:\Users\Administrator\.doubao-bot\credentials.json',
++      'C:\Users\Administrator\.doubao-bot\config.json',
++      'C:\Users\Administrator\.bili-ai\credentials.json',
+     ]
+     const info = paths.map(p => ({
+       path: p,
+@@ -575,7 +575,7 @@ async function biliModifyRelation(res, fid, act) {
+ }
+ 
+ function extractCookie(cookieStr, name) {
+-  const m = cookieStr.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'))
++  const m = cookieStr.match(new RegExp('(?:^|;\s*)' + name + '=([^;]+)'))
+   return m ? decodeURIComponent(m[1]) : null
+ }
+ 
+@@ -1139,19 +1139,19 @@ var btnRun=document.getElementById('btn-run');if(btnRun)btnRun.onclick=async fun
+   var started=false
+   es.onmessage=function(e){
+     var d=JSON.parse(e.data)
+-    if(d.type==='start'){started=true;log.textContent+='分身开始醒来...\\n'}
+-    else if(d.type==='stdout'){log.textContent+=d.text+'\\n';log.classList.add('streaming');log.scrollTop=log.scrollHeight}
+-    else if(d.type==='stderr'){log.textContent+='[错误] '+d.text+'\\n'}
++    if(d.type==='start'){started=true;log.textContent+='分身开始醒来...\n'}
++    else if(d.type==='stdout'){log.textContent+=d.text+'\n';log.classList.add('streaming');log.scrollTop=log.scrollHeight}
++    else if(d.type==='stderr'){log.textContent+='[错误] '+d.text+'\n'}
+     else if(d.type==='done'){
+       log.classList.remove('streaming')
+-      log.textContent+=('\\n完成，退出码: '+d.code+' 于 '+new Date(d.time).toLocaleTimeString()+'\\n')
++      log.textContent+=('\n完成，退出码: '+d.code+' 于 '+new Date(d.time).toLocaleTimeString()+'\n')
+       status.className=d.code===0?'tag online':'tag offline'
+       status.textContent=d.code===0?'完成 (码0)':'退出码 '+d.code
+       btn.disabled=false;btn.textContent='唤醒分身'
+       es.close()
+     }
+   }
+-  es.onerror=function(){if(!started){log.textContent='连接失败，检查服务端口\\n';btn.disabled=false;btn.textContent='唤醒分身';es.close()}}
++  es.onerror=function(){if(!started){log.textContent='连接失败，检查服务端口\n';btn.disabled=false;btn.textContent='唤醒分身';es.close()}}
+ }
+ 
+ var btnSaveC=document.getElementById('btn-save-owner');if(btnSaveC)btnSaveC.onclick=async function(){
+@@ -1179,8 +1179,8 @@ window.testFollowFetch=async function(){
+   var items=r.items||[]
+   var msg=''
+   if(items.length>0){
+-    msg='API OK! '+items.length+' feeds:\\n'
+-    items.slice(0,5).forEach(function(i){msg+='  '+i.pub+' '+i.up+'('+i.mid+') '+i.title+' BV='+i.bvid+'\\n'})
++    msg='API OK! '+items.length+' feeds:\n'
++    items.slice(0,5).forEach(function(i){msg+='  '+i.pub+' '+i.up+'('+i.mid+') '+i.title+' BV='+i.bvid+'\n'})
+   }else{
+     msg='API returned: '+(r.error||'empty, cookie expired?')
+   }
+@@ -1453,18 +1453,18 @@ async function runTool(kind){
+     q=document.getElementById('tool-whois-mid'); if(!q)return
+     var v=q.value.trim()
+     if(!v){ toast('请输入 UP 主 MID','error'); q.focus(); q.style.borderColor='#ff6b6b'; return }
+-    if(!/^\\d+$/.test(v)){ toast('MID 必须是纯数字','error'); q.focus(); q.select(); q.style.borderColor='#ff6b6b'; return }
++    if(!/^\d+$/.test(v)){ toast('MID 必须是纯数字','error'); q.focus(); q.select(); q.style.borderColor='#ff6b6b'; return }
+     q.style.borderColor=''
+     url='/tools/whois?mid='+v; label='MID: '+v
+   }else if(kind==='feed'){
+     url='/tools/feed'; label='刷新 Feed'
+   }else{ toast('未知工具: '+kind,'error'); return }
+   toast('请求中...','info')
+-  if(resultEl){ resultEl.textContent='⏳ '+label+'\\n请求中，请稍候...\\n'; resultEl.scrollTop=0 }
++  if(resultEl){ resultEl.textContent='⏳ '+label+'\n请求中，请稍候...\n'; resultEl.scrollTop=0 }
+   try{
+     var r=await fetch(url)
+     var text=await r.text()
+-    if(!r.ok){ if(resultEl)resultEl.textContent='❌ HTTP '+r.status+'\\n\\n'+text; toast('请求失败: '+r.status,'error'); return }
++    if(!r.ok){ if(resultEl)resultEl.textContent='❌ HTTP '+r.status+'\n\n'+text; toast('请求失败: '+r.status,'error'); return }
+     if(resultEl)resultEl.textContent=text || '(空输出)'
+     toast('完成 ✓','ok')
+   }catch(e){

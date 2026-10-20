@@ -14,6 +14,10 @@ const REAL_USER_HOMEDIR = (() => {
     try {
       if (fs.existsSync(path.join(h, '.doubao-bot', 'credentials.json')) ||
           fs.existsSync(path.join(h, '.bili-ai', 'credentials.json'))) {
+        if (process.env.USERPROFILE !== h) {
+          process.env.USERPROFILE = h
+          process.env.HOME = h
+        }
         return h
       }
     } catch {}

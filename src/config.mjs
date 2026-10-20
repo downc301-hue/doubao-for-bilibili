@@ -3,6 +3,27 @@ import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 
+{
+  const candidates = [
+    'C:\\Users\\Administrator',
+    'C:\\Users\\admin',
+    'C:\\root',
+    '/root',
+  ]
+  for (const h of candidates) {
+    try {
+      if (fs.existsSync(path.join(h, '.doubao-bot', 'credentials.json')) ||
+          fs.existsSync(path.join(h, '.bili-ai', 'credentials.json'))) {
+        if (process.env.USERPROFILE !== h) {
+          process.env.USERPROFILE = h
+          process.env.HOME = h
+        }
+        break
+      }
+    } catch {}
+  }
+}
+
 function resolveDataDir() {
   const candidates = [
     path.join(os.homedir(), '.doubao-bot'),

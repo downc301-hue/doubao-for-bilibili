@@ -308,6 +308,40 @@ page-orig.html
 
 **加完 `.gitignore` 后**，记得 `git rm --cached` 把已经被追踪的临时文件从 Git 索引里移除。
 
+### 4.9 B站写操作强制审核层（安全红线，不可绕过）
+
+> 智能体**绝对不能**直接 POST 到 B 站评论 / 私信 / 动态接口。账号被风控 = 小号阵亡 = 所有自动化废掉。
+
+**当前实现**：
+- `tools-def.mjs` 里的 `comment` 和 `reply` 工具 → 描述明确写"放进待审队列等主人同意才真发"
+- `tool-executor.mjs` 的 `case 'comment'` 和 `case 'reply'` → 永远只跑 `bili.mjs reply-draft add`，**绝对不传 `--go`**
+- `reply-draft add` 把草稿写入 `~/.bili-ai/pending-replies.json` + 自动推通知给主人
+- 主人审批（发/不发/改）后，才由插件跑 `bili.mjs comment --go --root --parent` 真正 POST
+
+**代码层面的两道闸口**：
+1. `comment.mjs` 自身：不传 `--dry` 也不传 `--go` → `console.error('refusing to run without an explicit --dry or --go'); process.exit(2)`
+2. `tool-executor.mjs`：AI 侧永远只拼 `reply-draft add` 命令，根本不会调用 `comment --go`
+
+**改代码时必须遵守**：
+- ❌ 不要删除 `tool-executor.mjs` 里 reply-draft 路径
+- ❌ 不要恢复 `comment` 的 `a.go ? '--go' : '--dry'` 逻辑
+- ❌ 不要在 `tools-def.mjs` 里暴露 `go` 参数给 LLM
+- ✅ 如果新增写操作工具（动态、专栏等），默认都走待审队列，除非主人明确说要自动发
+
+### 4.10 Edit 报错处理 + 版本同步
+
+#### Edit 报错不浪费时间
+- `Edit` 连续报错（特别是 "String to replace not found"）→ **立刻停手**，不要重试、不要调 PowerShell、不要跑脚本改文件
+- 报错原因基本是：CRLF/LF 换行符不匹配、字符串里有隐藏字符、工具自身 bug
+- **正确做法**：告诉主人 "Edit 报错，需要你重启 IDE"，等重启后再继续
+- 重启前最多用 Read 确认文件当前状态，但不要尝试用 RunCommand / PowerShell 绕开 Edit
+
+#### 版本号同步（开发目录 vs 生产目录判定）
+- `package.json` 的 `version` 字段是**唯一真相源**（在 `src/web.mjs` 第 87 行通过 `JSON.parse(fs.readFileSync(...package.json...))` 读出来的）
+- 前端 header 里的 `ver-badge` span（`<span id="ver-badge">v0.0.0</span>`）在页面加载后通过 `fetch('/api/version')` 动态填充真实版本号
+- **每次改完代码必须 bump 版本号**（比如 0.1.1 → 0.2.0），主人刷新页面看到新版本号 = 新代码已到位
+- 主人看到 `v0.0.0` = Node 进程没重启 / 浏览器缓存没清 / D 盘生产目录没同步
+
 ---
 
 ## 5. 快速同步脚本（可选，加到 PowerShell Profile）

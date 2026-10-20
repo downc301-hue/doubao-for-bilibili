@@ -8,6 +8,27 @@ import { getConfig } from './config.mjs'
 import { getDiaryText } from './memory.mjs'
 import { resolveBangumi, parseSeasonId } from '../tools/commands/bangumi.mjs'
 
+{
+  const candidates = [
+    'C:\\Users\\Administrator',
+    'C:\\Users\\admin',
+    'C:\\root',
+    '/root',
+  ]
+  for (const h of candidates) {
+    try {
+      if (fs.existsSync(path.join(h, '.doubao-bot', 'credentials.json')) ||
+          fs.existsSync(path.join(h, '.bili-ai', 'credentials.json'))) {
+        if (process.env.USERPROFILE !== h) {
+          process.env.USERPROFILE = h
+          process.env.HOME = h
+        }
+        break
+      }
+    } catch {}
+  }
+}
+
 const DATA_DIR = (() => {
   const candidates = [
     path.join(os.homedir(), '.doubao-bot'),
