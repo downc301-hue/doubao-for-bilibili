@@ -87,9 +87,19 @@ function readWhaleLog() {
   try {
     const raw = fs.readFileSync(p, 'utf8').trim()
     if (!raw) return []
-    return raw.split('\n').map(line => {
+    const all = raw.split('\n').map(line => {
       try { return JSON.parse(line) } catch { return null }
     }).filter(Boolean)
+    const seen = new Map()
+    const deduped = []
+    for (const e of all) {
+      const key = (e.kind || '') + '|' + (e.note || '') + '|' + (e.target || '')
+      const atMs = new Date(e.at || 0).getTime()
+      if (seen.has(key) && atMs - seen.get(key) < 60000) continue
+      seen.set(key, atMs)
+      deduped.push(e)
+    }
+    return deduped
   } catch { return [] }
 }
 
