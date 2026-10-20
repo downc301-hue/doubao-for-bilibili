@@ -92,15 +92,34 @@ export const TOOLS = [
     type: 'function',
     function: {
       name: 'comment',
-      description: '在视频下发评论（写操作！默认 dry-run，go=true 才真发）',
+      description: '在视频下发评论草稿，会放进待审队列等主人同意才真发（永远不直接POST）',
       parameters: {
         type: 'object',
         properties: {
-          bv: { type: 'string' },
+          bv: { type: 'string', description: '视频BV号' },
           text: { type: 'string', description: '评论内容，不要用双引号' },
-          go: { type: 'boolean', description: '真发还是 dry-run，默认 false' },
+          who: { type: 'string', description: '如果是@某人，填对方昵称（可选）' },
         },
         required: ['bv', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'reply',
+      description: '回复别人的评论（楼中楼），放进待审队列等主人同意才真发。坐标从 comment-digest 拿',
+      parameters: {
+        type: 'object',
+        properties: {
+          bv: { type: 'string', description: '视频BV号' },
+          root: { type: 'string', description: '根评论rpid（楼主那条）' },
+          parent: { type: 'string', description: '直接回复的那条rpid' },
+          text: { type: 'string', description: '回复内容，不要用双引号' },
+          who: { type: 'string', description: '对方昵称（可选，方便主人审核）' },
+          src: { type: 'string', description: '对方说的原话（可选，方便主人看上下文）' },
+        },
+        required: ['bv', 'root', 'parent', 'text'],
       },
     },
   },

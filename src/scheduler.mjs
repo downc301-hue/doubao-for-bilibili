@@ -189,12 +189,13 @@ export function startFollowWatcher() {
 
   const interval = Math.max(180, Number(config.interval || 300))
   const onlyWl = config.onlyWhitelist ? '--only-whitelist' : ''
+  const noCmt = config.noComment ? '--no-comment' : ''
   const script = path.join(process.cwd(), 'src', 'follow-await.mjs')
 
-  console.log(`🎬 启动关注列表守望（每 ${interval}s 扫一次${onlyWl ? ' · 仅白名单' : ''}）`)
+  console.log(`🎬 启动关注列表守望（每 ${interval}s 扫一次${onlyWl ? ' · 仅白名单' : ''}${noCmt ? ' · 养号模式(无评论)' : ''}）`)
 
   function launch() {
-    const args = [script, '--interval', String(interval), onlyWl].filter(Boolean)
+    const args = [script, '--interval', String(interval), onlyWl, noCmt].filter(Boolean)
     const p = spawn(process.execPath, args, {
       cwd: process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe'],

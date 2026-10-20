@@ -49,9 +49,21 @@ export async function executeToolAsync(name, args) {
     case 'comment': {
       const aid = await bvToAid(a.bv)
       if (!aid) return `[comment] 无法从 ${a.bv} 解析 aid`
-      const text = (a.text || '').replace(/"/g, '「').slice(0, 990)
-      const cmd = ['comment', '--oid', String(aid), '--bvid', a.bv, '--message', text]
-      cmd.push(a.go ? '--go' : '--dry')
+      const text = (a.text || '').replace(/"/g, '「').slice(0, 490)
+      const cmd = ['reply-draft', 'add', '--oid', String(aid), '--bvid', a.bv, '--message', text]
+      if (a.who) cmd.push('--who', String(a.who).slice(0, 60))
+      cmd.push('--root', String(aid))
+      cmd.push('--parent', String(aid))
+      return runBili(cmd)
+    }
+    case 'reply': {
+      if (!a.bv || !a.root || !a.parent || !a.text) return `[reply] 需要 bv, root, parent, text`
+      const aid = await bvToAid(a.bv)
+      if (!aid) return `[reply] 无法从 ${a.bv} 解析 aid`
+      const text = (a.text || '').replace(/"/g, '「').slice(0, 490)
+      const cmd = ['reply-draft', 'add', '--oid', String(aid), '--bvid', a.bv, '--root', String(a.root), '--parent', String(a.parent), '--message', text]
+      if (a.who) cmd.push('--who', String(a.who).slice(0, 60))
+      if (a.src) cmd.push('--src', String(a.src).slice(0, 300))
       return runBili(cmd)
     }
     case 'dm': {
