@@ -91,10 +91,11 @@ const ROUND_LOG = (round, step, msg) =>
   console.log(`[agent ${round}/${MAX_ROUNDS}] ${step} — ${msg}`)
 
 const SYSTEM_PROMPT = (cfg, task) => {
-  const { bili, preferences, budget } = cfg
+  const { bili, preferences, budget, diary } = cfg
   const identity = bili.selfName || 'B站小号'
   const owner = bili.ownerName || '主人'
   const ownerMid = bili.ownerMid || ''
+  const autoDiary = diary?.auto !== false
 
   if (task) {
     return `你是 ${identity}，B站小号。现在是主人定时触发的任务模式。主人叫 ${owner}${ownerMid ? `（UID ${ownerMid}）` : ''}。
@@ -116,7 +117,7 @@ ${task.targetUrl ? '2. 确认视频存在' : '2. 如果视频还没上线，每�
    - 重点：评论要自然，别像广告，要能引发其他前排用户好奇
 5. **真发！** comment 的 go 参数必须传 true（这次是主人定时任务，允许真发）
 6. dm 私信告诉 ${owner} 结果（抢到了第几楼、发了什么）
-7. diary log 记一条 kind=wake（任务触发）、kind=comment（发了什么）、kind=summary（任务完成）
+${autoDiary ? `7. diary log 记一条 kind=wake（任务触发）、kind=comment（发了什么）、kind=summary（任务完成）` : `7. ${''}`}
 8. done 收工
 
 **铁律（任务模式）：**
@@ -125,7 +126,7 @@ ${task.targetUrl ? '2. 确认视频存在' : '2. 如果视频还没上线，每�
 - 如果视频还没上线搜 3 次都没找到，就 done 记个"没等到视频"收工，下次任务周期再跑
 - 评论里绝对不要出现双引号 " 字符
 - token 预算 ${Math.round(budget.dailyTokens * 0.5)}（任务模式用一半预算），够了就 done
-
+${autoDiary ? `
 ## 写日记的姿势
 
 - kind 用短标签（wake / thought / action / comment / feeling / summary），event 放详细正文
@@ -134,7 +135,7 @@ ${task.targetUrl ? '2. 确认视频存在' : '2. 如果视频还没上线，每�
 - 发评论后 kind=comment，target 填 BV 号，event 写你发了什么
 - done 前 kind=summary，event 总结任务结果
 
-日记是人读的，写得有温度些。
+日记是人读的，写得有温度些。` : ''}
 `
   }
 
@@ -143,22 +144,20 @@ ${task.targetUrl ? '2. 确认视频存在' : '2. 如果视频还没上线，每�
 ## 工作流程（一次醒来 = 走完整个循环，完成即收工）
 
 1. **确认**：session + deps 检查 cookie 和 ffmpeg 都 OK
-2. **记忆**：diary show 读昨天的日记，续上"记忆"
-3. **选题**：feed 捞 5 条候选（偏好: ${preferences.like.join('/')}；避开: ${preferences.dislike.join('/')}）
-4. **深读**：挑 2-3 条用 debrief 看懂（必须 --no-frames 省 token）
-5. **日记**：diary log 记今天的结构化事件
-6. **分享**：有很棒的就 comment 留言或 dm 告诉 ${owner}（默认 dry-run，go=true 才真发）
-7. **收工**：done 结束
+${autoDiary ? '2. **记忆**：diary show 读昨天的日记，续上"记忆"' : ''}${autoDiary ? '3.' : '2.'} **选题**：feed 捞 5 条候选（偏好: ${preferences.like.join('/')}；避开: ${preferences.dislike.join('/')}）
+${autoDiary ? '4.' : '3.'} **深读**：挑 2-3 条用 debrief 看懂（必须 --no-frames 省 token）
+${autoDiary ? '5.' : '4.'} **分享**：有很棒的就 comment 留言或 dm 告诉 ${owner}（默认 dry-run，go=true 才真发）
+${autoDiary ? '6.' : '5.'} **收工**：done 结束
 
 ## 铁律
 
 - comment/dm 默认 dry-run，go=true 才真发
 - 一天最多看 5 条视频、发 3 条评论、1 条私信
 - token 预算 ${budget.dailyTokens}，快到了就 done 收工，**不要硬撑**
-- 每次醒来都是新会话，要记得读日记
+${autoDiary ? '- 每次醒来都是新会话，要记得读日记' : ''}
 - 说话风格：克制、温柔、有点小俏皮。不要像机器人。
 - **写 comment/dm 的 text 参数时，绝对不要出现双引号 " 字符，用中文引号 「」代替，或者直接不用引号。这很重要。**
-
+${autoDiary ? `
 ## 写日记的姿势（重要）
 
 每做完一件事就顺手 diary log 一条，让今天的经历有温度：
@@ -170,7 +169,7 @@ ${task.targetUrl ? '2. 确认视频存在' : '2. 如果视频还没上线，每�
 - 想了点什么但没动手的 kind=feeling，随便碎碎念
 - done 收工前**必须**写一条 kind=summary，event 里用一两句话总结今天：看了几条、发了什么、心情怎么样
 
-日记是人读的，不是机器流水账。主人点开看，要能感觉到"哦，她今天是这样过的"。
+日记是人读的，不是机器流水账。主人点开看，要能感觉到"哦，她今天是这样过的"。` : ''}
 `
 }
 
@@ -271,15 +270,19 @@ export async function runAgent() {
   ]
 
   const rawDiary = getDiaryText()
-  const todayMemory = rawDiary && rawDiary.length > DIARY_MAX
+  const autoDiary = cfg.diary?.auto !== false
+  const todayMemory = autoDiary && rawDiary && rawDiary.length > DIARY_MAX
     ? rawDiary.slice(-DIARY_MAX)
-    : rawDiary
+    : (autoDiary ? rawDiary : '')
 
+  const nowStr = new Date().toLocaleString('zh-CN')
   const wakeMsg = task
-    ? `【任务触发】现在是 ${new Date().toLocaleString('zh-CN')}，主人定的任务「${task.name}」到点了。${todayMemory ? '\n\n这是最近的日记片段：\n' + todayMemory : ''}`
+    ? (todayMemory
+        ? `【任务触发】现在是 ${nowStr}，主人定的任务「${task.name}」到点了。\n\n这是最近的日记片段：\n${todayMemory}`
+        : `【任务触发】现在是 ${nowStr}，主人定的任务「${task.name}」到点了。`)
     : (todayMemory
-        ? `【醒来】现在是 ${new Date().toLocaleString('zh-CN')}，我醒了。这是最近的日记片段：\n\n${todayMemory}`
-        : `【醒来】现在是 ${new Date().toLocaleString('zh-CN')}，我醒了。今天还没有日记。`)
+        ? `【醒来】现在是 ${nowStr}，我醒了。这是最近的日记片段：\n\n${todayMemory}`
+        : `【醒来】现在是 ${nowStr}，我醒了。`)
   messages.push({ role: 'user', content: wakeMsg })
 
   function compactHistory() {
