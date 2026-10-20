@@ -687,6 +687,22 @@ main{max-width:1200px;margin:32px auto;padding:0 28px}
 .stat{background:var(--c-bg3);border-radius:12px;padding:20px}
 .stat .label{font-size:15px;color:var(--c-text-dim)}
 .stat .value{font-size:48px;font-weight:700;margin-top:6px;letter-spacing:-.5px}
+.stat.clickable{cursor:pointer;transition:transform .15s,box-shadow .2s}
+.stat.clickable:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.3)}
+.stat.clickable .hint-link{color:var(--c-accent);font-size:18px;margin-left:6px;opacity:.7}
+.stat.clickable:hover .hint-link{opacity:1}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal-box{background:var(--c-bg2);border:1px solid var(--c-border);border-radius:16px;padding:24px;max-width:800px;width:100%;max-height:90vh;overflow-y:auto}
+.modal-box h3{font-size:20px;color:var(--c-text-title);margin-bottom:16px;display:flex;justify-content:space-between;align-items:center}
+.modal-box h3 .close-btn{background:none;border:none;color:var(--c-text-dim);font-size:24px;cursor:pointer;padding:0 8px;line-height:1}
+.modal-box h3 .close-btn:hover{color:var(--c-text)}
+.chart-legend{display:flex;gap:16px;margin-bottom:12px;font-size:14px;color:var(--c-text-mid)}
+.chart-legend span{display:flex;align-items:center;gap:6px}
+.chart-legend .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.chart-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.chart-summary .mini-stat{background:var(--c-bg3);border-radius:10px;padding:10px;text-align:center}
+.chart-summary .mini-stat .ms-label{font-size:12px;color:var(--c-text-dim)}
+.chart-summary .mini-stat .ms-value{font-size:18px;font-weight:600;color:var(--c-accent)}
 .stat.ok .value{color:var(--c-ok)}
 .stat.warn .value{color:var(--c-warn)}
 .stat.err .value{color:var(--c-err)}
@@ -807,8 +823,8 @@ html[data-theme="light"] header .theme-bar button.active{background:#fff;color:v
   <div class="card">
     <h2>快速状态</h2>
     <div class="grid">
-      <div class="stat ${todayTokens > budget ? 'warn' : 'ok'}">
-        <div class="label">今日 Token / 预算</div>
+      <div class="stat ${todayTokens > budget ? 'warn' : 'ok'} clickable" onclick="showTokenChart()" title="点击查看消耗趋势">
+        <div class="label">今日 Token / 预算 <span class="hint-link">📈</span></div>
         <div class="value">${todayTokens.toLocaleString()} / ${budget.toLocaleString()}</div>
         <div class="bar ${tokenPct > 80 ? (tokenPct > 95 ? 'crit' : 'warn') : ''}"><div style="width:${tokenPct}%"></div></div>
       </div>
@@ -1408,7 +1424,93 @@ loadTasks()
 setInterval(loadTasks,30000)
 refreshBiliSelf()
 loadBiliFollowings()
+
+async function showTokenChart(){
+  const modal=document.getElementById('token-modal');
+  const content=document.getElementById('token-chart-content');
+  modal.style.display='flex';
+  content.textContent='加载中...';
+  try{
+    const r=await fetch('/tokens');
+    const j=await r.json();
+    const data=j.history||[];
+    if(data.length===0){
+      content.innerHTML='<div style="text-align:center;padding:40px;color:var(--c-text-dim)">暂无数据<br><small>分身还没醒过，今天 token 消耗为 0</small></div>';
+      return;
+    }
+    renderTokenChart(data);
+  }catch(e){
+    content.textContent='加载失败: '+e.message;
+  }
+}
+function closeTokenChart(){
+  document.getElementById('token-modal').style.display='none';
+}
+function renderTokenChart(data){
+  const content=document.getElementById('token-chart-content');
+  const W=720,H=280,PL=60,PR=20,PT=20,PB=40;
+  const iw=W-PL-PR,ih=H-PT-PB;
+  const maxVal=Math.max(...data.map(d=>Math.max(d.total||0,d.input||0,d.output||0)),5000);
+  const niceMax=Math.ceil(maxVal/5000)*5000;
+  const n=data.length;
+  const xStep=n>1?iw/(n-1):0;
+  const xOf=i=>PL+i*xStep;
+  const yOf=v=>PT+ih-(v/niceMax*ih);
+  let svg='<svg width="100%" viewBox="0 0 '+W+' '+H+'" style="max-width:720px">';
+  for(let i=0;i<=4;i++){
+    const y=PT+ih/4*i;
+    const v=Math.round(niceMax-niceMax/4*i);
+    svg+='<line x1="'+PL+'" y1="'+y+'" x2="'+(W-PR)+'" y2="'+y+'" stroke="#2a2d36" stroke-dasharray="3,3"/>';
+    svg+='<text x="'+(PL-8)+'" y="'+(y+4)+'" text-anchor="end" fill="#889" font-size="12">'+(v>=1000?(v/1000).toFixed(0)+'k':v)+'</text>';
+  }
+  data.forEach((d,i)=>{
+    const x=xOf(i);
+    const shortDate=d.date.slice(5);
+    svg+='<text x="'+x+'" y="'+(H-PB+18)+'" text-anchor="middle" fill="#889" font-size="11">'+shortDate+'</text>';
+  });
+  const colors={input:'#38bdf8',output:'#ff9f43'};
+  ['input','output'].forEach(key=>{
+    let pts='';
+    data.forEach((d,i)=>{pts+=xOf(i)+','+yOf(d[key]||0)+' '});
+    pts=pts.trim();
+    svg+='<polyline points="'+pts+'" fill="none" stroke="'+colors[key]+'" stroke-width="2.5"/>';
+    data.forEach((d,i)=>{
+      svg+='<circle cx="'+xOf(i)+'" cy="'+yOf(d[key]||0)+'" r="4" fill="'+colors[key]+'" stroke="#0f1115" stroke-width="2"/>';
+    });
+  });
+  const today=new Date().toLocaleDateString('sv-SE');
+  const todayIdx=data.findIndex(d=>d.date===today);
+  if(todayIdx>=0){
+    const xs=xOf(todayIdx);
+    const w=xStep||40;
+    svg+='<rect x="'+(xs-w/2)+'" y="'+PT+'" width="'+w+'" height="'+ih+'" fill="#0ea5e9" opacity="0.08"/>';
+  }
+  svg+='</svg>';
+  const tot=data.reduce((s,d)=>s+(d.total||0),0);
+  const calls=data.reduce((s,d)=>s+(d.apiCalls||0),0);
+  const avgDays=data.length;
+  const avg=Math.round(tot/Math.max(avgDays,1));
+  content.innerHTML='<div class="chart-summary">'+
+    '<div class="mini-stat"><div class="ms-label">总消耗</div><div class="ms-value">'+tot.toLocaleString()+'</div></div>'+
+    '<div class="mini-stat"><div class="ms-label">API 调用</div><div class="ms-value">'+calls+'</div></div>'+
+    '<div class="mini-stat"><div class="ms-label">有效天数</div><div class="ms-value">'+avgDays+'</div></div>'+
+    '<div class="mini-stat"><div class="ms-label">日均</div><div class="ms-value">'+avg.toLocaleString()+'</div></div>'+
+    '</div>'+
+    '<div class="chart-legend">'+
+    '<span><i class="dot" style="background:#38bdf8"></i>输入 (prompt)</span>'+
+    '<span><i class="dot" style="background:#ff9f43"></i>输出 (completion)</span>'+
+    (todayIdx>=0?'<span style="color:#0ea5e9">▌今日高亮</span>':'')+
+    '</div>'+svg;
+}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeTokenChart()});
+
 </script>
+<div id="token-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeTokenChart()">
+  <div class="modal-box">
+    <h3>Token 消耗趋势 <button class="close-btn" onclick="closeTokenChart()">×</button></h3>
+    <div id="token-chart-content">加载中...</div>
+  </div>
+</div>
 </body>
 </html>`
 }
