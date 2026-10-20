@@ -238,6 +238,76 @@ PowerShell 把逗号 `,` 识别为数组构造符，有两种破坏源码的场�
 - `.bak` 备份文件里也有同样的历史损坏，说明这个坑之前已经踩过但没记录
 - **修复花了 40 分钟**：先定位 script 块边界，再从 .bak 提取未损坏部分，最后用独立 `.mjs` 脚本干净地重写整个 script 块
 
+### 4.7 Git commit 快照（强制，不改就等着哭）
+
+#### 原理
+本项目代码改动频繁、同步链路长（改 E 盘 → 同步 D 盘 → 宝塔重启），而且经常在**同一个文件上反复迭代**（web.mjs 单文件 1500+ 行）。如果改之前没快照：
+- 改坏了想回滚 → 只能靠文件系统备份，效率极低
+- 用户反馈"字号又变回去了" → `git log` 找不到是谁改的，只能瞎猜
+- 临时调试脚本 / 测试文件混进 commit → 污染仓库历史
+
+#### 核心强制规则
+1. **动手改任何源文件之前，先 `git add src/ && git commit -m "wip: 改字号"`**——哪怕只改一行 CSS。commit message 前缀用 `wip:` 表示"工作快照"。
+2. **一次 commit 只包含一类改动**：修 web.mjs 的正则 → 单独 commit；改 agent.mjs 的 token 逻辑 → 另一次 commit。不要把 4 个文件 3 个不相关的 bug 混在一个 commit 里。
+3. **提交前 `git status` 检查**：有没有临时文件（`page-final.html`、`check-buttons.mjs`、`diary-live.json`、`fix-*.mjs` 等）混进来？有的话先 `.gitignore` 或 `git rm --cached` 清掉。
+
+#### 临时文件识别标准
+以下文件**绝对不能进 Git**：
+- `page*.html`、`page*.bin`、`*.diff` — 浏览器导出的页面快照 / diff 输出
+- `check-*.mjs`、`fix-*.mjs`、`test-*.mjs`、`verify-*.mjs`、`waste-analysis.mjs` — 临时调试脚本
+- `diary-live.json`、`tokens-live.json`、`page-orig.html` — 运行时数据备份
+- `$null`、`console.log('`、`l.includes('MID'` — PowerShell / CMD 命令行误操作产生的垃圾文件
+
+#### 实战教训（2026-10-20，就是今天）
+修复 token 累加 bug + 日记时区 bug + 字号 bug，commit 时混进了：
+- 27 个临时文件（page-final.html、check-buttons.mjs、waste-analysis.mjs…）
+- 3 个 PowerShell 垃圾文件（`$null`、`console.log('`、`l.includes('MID'`）
+- 还被 `git reset HEAD~1` 搞丢了原始修改，靠 `git reflog` 才找回来
+- 回滚后用户说"字号又变回去了"，`git log` 里根本找不到字号的历史记录——因为之前改字号时**没 commit**，直接同步到 D 盘了
+
+**正确做法**：
+```powershell
+# 改字号前，先快照
+git add src/web.mjs && git commit -m "wip: 准备改 token 逻辑"
+# 然后改
+node fix-bug1.mjs
+# 改完再 commit
+git add src/ && git commit -m "fix: token按日过滤+日记本地时区+字号48px"
+git push
+```
+
+### 4.8 .gitignore 临时文件补充
+
+以下 glob 应该加到 `.gitignore`，但历史原因没加，现在补上：
+
+```gitignore
+# 临时调试脚本（AI 工程师排查问题时产生的）
+check-*.mjs
+fix-*.mjs
+test-*.mjs
+verify-*.mjs
+waste-analysis.mjs
+render-test.mjs
+
+# 临时页面快照（curl -o page.html 抓的）
+page*.html
+page*.bin
+page2.html
+
+# 临时 diff / 分析输出
+*.diff
+*_check.mjs
+_*.mjs
+_*.js
+
+# 临时 JSON 数据备份
+diary-live.json
+tokens-live.json
+page-orig.html
+```
+
+**加完 `.gitignore` 后**，记得 `git rm --cached` 把已经被追踪的临时文件从 Git 索引里移除。
+
 ---
 
 ## 5. 快速同步脚本（可选，加到 PowerShell Profile）

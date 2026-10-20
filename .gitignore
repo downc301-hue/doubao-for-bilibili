@@ -37,6 +37,39 @@ yarn-error.log*
 .cache/
 
 # ============================================================
+# 🧹 临时调试文件（AI 工程师排查问题时产生，绝不进 Git）
+# ============================================================
+# 临时调试脚本
+check-*.mjs
+fix-*.mjs
+test-*.mjs
+verify-*.mjs
+waste-analysis.mjs
+render-test.mjs
+
+# 临时页面快照（curl -o page.html 抓的）
+page*.html
+page*.bin
+page2.html
+
+# 临时 diff / 分析输出
+*.diff
+*_check.mjs
+_*.mjs
+_*.js
+
+# 临时 JSON 数据备份
+diary-live.json
+tokens-live.json
+page-orig.html
+
+# PowerShell / CMD 误操作产生的垃圾文件
+"$null"
+"console.log('"
+"l.includes('MID'"
+"{"
+
+# ============================================================
 # 🔒 用户敏感数据（绝不能进 git）
 # ============================================================
 # B 站凭据（SESSDATA / bili_jct / buvid3）
@@ -71,4 +104,3 @@ follow-config.local.json
 **/*key*.json
 # AI IDE 配置
 .trae/
-
