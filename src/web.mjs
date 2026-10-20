@@ -236,7 +236,11 @@ async function api(req, res, pathname) {
     const logs = readWhaleLog()
     const grouped = {}
     for (const e of logs) {
-      const d = String(e.at || '').slice(0, 10)
+      const atStr = String(e.at || '')
+      let d = atStr.slice(0, 10)
+      if (atStr.includes('T')) {
+        try { d = new Date(atStr).toLocaleDateString('sv-SE') } catch {}
+      }
       if (!d) continue
       if (!grouped[d]) grouped[d] = []
       let kind = e.kind || ''
@@ -632,9 +636,9 @@ function renderDashboard() {
   } : null
 
   const tokenHistory = tokens.history || []
-  const todayTokens = tokenHistory.length > 0
-    ? tokenHistory[tokenHistory.length - 1].total || 0
-    : 0
+  const todayStr = new Date().toLocaleDateString('sv-SE')
+  const todayRec = tokenHistory.find(h => h.date === todayStr)
+  const todayTokens = todayRec ? (todayRec.total || 0) : 0
   const budget = cfg.budget?.dailyTokens || 50000
   const tokenPct = Math.min(100, Math.round(todayTokens / budget * 100))
 
@@ -682,11 +686,11 @@ main{max-width:1200px;margin:32px auto;padding:0 28px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
 .stat{background:var(--c-bg3);border-radius:12px;padding:20px}
 .stat .label{font-size:15px;color:var(--c-text-dim)}
-.stat .value{font-size:44px;font-weight:700;margin-top:4px;letter-spacing:-1px}
+.stat .value{font-size:48px;font-weight:700;margin-top:6px;letter-spacing:-.5px}
 .stat.ok .value{color:var(--c-ok)}
 .stat.warn .value{color:var(--c-warn)}
 .stat.err .value{color:var(--c-err)}
-.bar{height:12px;background:var(--c-bg4);border-radius:5px;margin-top:12px;overflow:hidden}
+.bar{height:10px;background:var(--c-bg4);border-radius:5px;margin-top:12px;overflow:hidden}
 .bar>div{height:100%;background:var(--c-accent);border-radius:5px;transition:width .3s}
 .bar.warn>div{background:linear-gradient(90deg,var(--c-warn),#ff7a45)}
 .bar.crit>div{background:linear-gradient(90deg,#ff7a45,var(--c-err))}
