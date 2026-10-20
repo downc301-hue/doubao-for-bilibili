@@ -96,6 +96,28 @@ async function renderDashboard(){
     });
     body.innerHTML=html;
   }
+
+  var btnRun=document.getElementById('btn-run');
+  var runStatus=document.getElementById('run-status');
+  if(btnRun&&runStatus){
+    var st=d.agentStatus||'idle';
+    if(st==='running'){
+      btnRun.disabled=true;btnRun.textContent='运行中...';
+      runStatus.className='tag online';runStatus.textContent='运行中';
+    }else if(st==='done'){
+      btnRun.disabled=false;btnRun.textContent='现在就唤醒';
+      runStatus.className='tag online';runStatus.textContent='本轮已完成';
+    }else if(st==='forced'){
+      btnRun.disabled=false;btnRun.textContent='现在就唤醒';
+      runStatus.className='tag offline';runStatus.textContent='达上限收工';
+    }else if(st==='aborted'){
+      btnRun.disabled=false;btnRun.textContent='现在就唤醒';
+      runStatus.className='tag offline';runStatus.textContent='已中止';
+    }else{
+      btnRun.disabled=false;btnRun.textContent='现在就唤醒';
+      runStatus.className='tag offline';runStatus.textContent='待运行';
+    }
+  }
 }
 
 renderDashboard();

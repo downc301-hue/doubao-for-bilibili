@@ -348,8 +348,11 @@ async function api(req, res, pathname) {
       summary: (diaryMap[latestDate].find(e => e.kind === 'summary')?.note) || `今天 ${diaryMap[latestDate].length} 条`,
       events: diaryMap[latestDate].filter(e => e.kind !== 'summary').slice(-2),
     } : null
+    const agentState = getJson('agent-state.json')
+    const agentStatus = agentState.status || 'idle'
     return send(res, 200, JSON.stringify({
       todayTokens, budget, latestDiary,
+      agentStatus,
       creds: { doubaoApiKey: !!creds.doubaoApiKey, sessdata: !!creds.sessdata },
       bili: cfg.bili || {},
     }))
