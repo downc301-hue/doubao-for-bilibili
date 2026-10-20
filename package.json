@@ -1,6 +1,6 @@
 {
   "name": "doubao-bili-bot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "豆包大模型 + B站小号 = AI 自动过日子：自己刷 B 站、看懂视频、写两本日记、把值得的 @ 你。对标 dsh-bili-whale，但脱离 DSH 做独立 Node.js 应用。",
   "type": "module",
   "main": "src/index.mjs",
@@ -11,7 +11,12 @@
     "run-listen": "node src/run-listen.mjs",
     "init": "node scripts/init.mjs"
   },
-  "keywords": ["doubao", "bilibili", "ai-bot", "agent"],
+  "keywords": [
+    "doubao",
+    "bilibili",
+    "ai-bot",
+    "agent"
+  ],
   "author": "",
   "license": "MIT",
   "engines": {
