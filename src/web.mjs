@@ -259,7 +259,7 @@ async function api(req, res, pathname) {
         kind: kind,
         target: target,
         note: note,
-        time: String(e.at || '').slice(11, 16),
+        time: (() => { try { return new Date(e.at).toLocaleTimeString('zh-CN', {hour12:false}).slice(0,5) } catch { return String(e.at||'').slice(11,16) } })(),
       })
     }
     const diary = Object.entries(grouped).map(([date, events]) => {
