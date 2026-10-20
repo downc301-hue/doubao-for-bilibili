@@ -6,7 +6,34 @@ import { spawn } from 'node:child_process'
 process.on('unhandledRejection', (err) => { console.error('[ERR] unhandledRejection:', err?.message || err) })
 process.on('uncaughtException', (err) => { console.error('[ERR] uncaughtException:', err?.message || err) })
 
-const DATA_DIR = path.join(os.homedir(), '.doubao-bot')
+const REAL_USER_HOMEDIR = (() => {
+  const candidates = [
+    'C:\\Users\\Administrator',
+    'C:\\Users\\admin',
+    'C:\\root',
+    '/root',
+  ]
+  for (const h of candidates) {
+    try {
+      if (fs.existsSync(path.join(h, '.doubao-bot', 'credentials.json')) ||
+          fs.existsSync(path.join(h, '.bili-ai', 'credentials.json'))) {
+        return h
+      }
+    } catch {}
+  }
+  return os.homedir()
+})()
+
+function spawnEnv() {
+  const env = { ...process.env }
+  if (process.env.USERPROFILE !== REAL_USER_HOMEDIR) {
+    env.USERPROFILE = REAL_USER_HOMEDIR
+    env.HOME = REAL_USER_HOMEDIR
+  }
+  return env
+}
+
+const DATA_DIR = path.join(REAL_USER_HOMEDIR, '.doubao-bot')
 const CRED_FILE = path.join(DATA_DIR, 'credentials.json')
 const MAIN_CFG = path.join(DATA_DIR, 'config.json')
 const cred = JSON.parse(fs.readFileSync(CRED_FILE, 'utf8'))
@@ -118,6 +145,7 @@ async function runArchiveActions(video) {
     const proc = spawn(process.execPath, [path.join(scriptsDir, name + '.mjs'), '--aid', String(video.aid), '--bvid', video.bvid, flag], {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: process.cwd(),
+      env: spawnEnv(),
     })
     let out = ''
     proc.stdout.on('data', d => { out += d.toString(); process.stdout.write(`   > ${d}`) })
@@ -193,6 +221,7 @@ function runCommentTask(msg, video) {
     const proc = spawn(process.execPath, [path.join(process.cwd(), 'src', 'run-task-direct.mjs'), task], {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: process.cwd(),
+      env: spawnEnv(),
     })
     let out = ''
     proc.stdout.on('data', d => { out += d.toString(); process.stdout.write(`   > ${d}`) })

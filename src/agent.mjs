@@ -1,3 +1,6 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import os from 'node:os'
 import { chatWithTools, getTokenCount, resetTokenCount } from './doubao-client.mjs'
 import { TOOLS } from './tools-def.mjs'
 import { executeTool } from './tool-executor.mjs'
@@ -5,7 +8,64 @@ import { getConfig } from './config.mjs'
 import { getDiaryText } from './memory.mjs'
 import { resolveBangumi, parseSeasonId } from '../tools/commands/bangumi.mjs'
 
-const MAX_ROUNDS = 15
+const DATA_DIR = (() => {
+  const candidates = [
+    path.join(os.homedir(), '.doubao-bot'),
+    path.join(os.homedir(), '.bili-ai'),
+    'C:\\Users\\Administrator\\.doubao-bot',
+    'C:\\Users\\Administrator\\.bili-ai',
+    'C:\\Users\\admin\\.doubao-bot',
+    'C:\\Users\\admin\\.bili-ai',
+    'C:\\root\\.doubao-bot',
+    '/root/.doubao-bot',
+    path.join(process.cwd(), '.doubao-bot'),
+  ]
+  for (const d of candidates) {
+    try { fs.mkdirSync(d, { recursive: true }); if (fs.accessSync(d), true) return d } catch {}
+  }
+  return path.join(os.homedir(), '.doubao-bot')
+})()
+
+const TOKENS_FILE = path.join(DATA_DIR, 'tokens.json')
+const STATE_FILE = path.join(DATA_DIR, 'agent-state.json')
+
+function saveTokens(tokens) {
+  try {
+    let data = { history: [] }
+    if (fs.existsSync(TOKENS_FILE)) {
+      try { data = JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8')) } catch {}
+    }
+    const today = new Date().toLocaleDateString('sv-SE')
+    const last = data.history[data.history.length - 1]
+    if (last && last.date === today) {
+      last.total = (last.total || 0) + (tokens.total || 0)
+      last.input = (last.input || 0) + (tokens.input || 0)
+      last.output = (last.output || 0) + (tokens.output || 0)
+      last.apiCalls = (last.apiCalls || 0) + 1
+    } else {
+      data.history.push({
+        date: today,
+        total: tokens.total || 0,
+        input: tokens.input || 0,
+        output: tokens.output || 0,
+        apiCalls: 1,
+      })
+    }
+    if (data.history.length > 30) data.history = data.history.slice(-30)
+    fs.writeFileSync(TOKENS_FILE, JSON.stringify(data, null, 2))
+  } catch (e) { console.error('[agent] saveTokens error:', e.message) }
+}
+
+function writeAgentState(state) {
+  try {
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2))
+  } catch (e) { console.error('[agent] writeAgentState error:', e.message) }
+}
+
+const MAX_ROUNDS = 6
+const MAX_HISTORY = 10
+const DIARY_MAX = 500
+const TOOL_MAX = 1500
 const ROUND_LOG = (round, step, msg) =>
   console.log(`[agent ${round}/${MAX_ROUNDS}] ${step} — ${msg}`)
 
@@ -122,6 +182,32 @@ function safeParseArgs(raw) {
 export async function runAgent() {
   const cfg = getConfig()
   resetTokenCount()
+  writeAgentState({ status: 'running', startAt: new Date().toISOString(), rounds: 0, tokens: { total: 0 } })
+
+  const credCandidates = [
+    path.join(DATA_DIR, 'credentials.json'),
+    'C:\\Users\\Administrator\\.bili-ai\\credentials.json',
+    'C:\\Users\\Administrator\\.doubao-bot\\credentials.json',
+    path.join(os.homedir(), '.bili-ai', 'credentials.json'),
+    path.join(os.homedir(), '.doubao-bot', 'credentials.json'),
+  ]
+  const credOk = credCandidates.some(p => { try { return fs.existsSync(p) } catch { return false } })
+  if (!credOk) {
+    const msg = `凭据文件不存在（已检查 ${credCandidates.join(', ')}），跳过豆包 API 调用。请主人重新配置 B 站 cookie (SESSDATA / bili_jct)。`
+    console.log(`\n❌ ${msg}`)
+    writeAgentState({
+      status: 'aborted',
+      reason: 'credentials_missing',
+      note: msg,
+      startAt: new Date().toISOString(),
+      endAt: new Date().toISOString(),
+      rounds: 0,
+      tokens: { total: 0, input: 0, output: 0 },
+    })
+    saveTokens({ total: 0, input: 0, output: 0, apiCalls: 0 })
+    return
+  }
+
   let task = null
   try {
     const raw = process.env.DOUBAO_TASK
@@ -163,13 +249,26 @@ export async function runAgent() {
     { role: 'system', content: SYSTEM_PROMPT(cfg, task) },
   ]
 
-  const todayMemory = getDiaryText()
+  const rawDiary = getDiaryText()
+  const todayMemory = rawDiary && rawDiary.length > DIARY_MAX
+    ? rawDiary.slice(-DIARY_MAX)
+    : rawDiary
+
   const wakeMsg = task
     ? `【任务触发】现在是 ${new Date().toLocaleString('zh-CN')}，主人定的任务「${task.name}」到点了。${todayMemory ? '\n\n这是最近的日记片段：\n' + todayMemory : ''}`
     : (todayMemory
         ? `【醒来】现在是 ${new Date().toLocaleString('zh-CN')}，我醒了。这是最近的日记片段：\n\n${todayMemory}`
         : `【醒来】现在是 ${new Date().toLocaleString('zh-CN')}，我醒了。今天还没有日记。`)
   messages.push({ role: 'user', content: wakeMsg })
+
+  function compactHistory() {
+    if (messages.length <= MAX_HISTORY) return
+    const system = messages[0]
+    const recent = messages.slice(-(MAX_HISTORY - 1))
+    messages.length = 0
+    messages.push(system, ...recent)
+    ROUND_LOG('compact', '历史截断', `保留 ${messages.length} 条`)
+  }
 
   if (task) {
     console.log(`\n🎯 === 定时任务触发：${task.name} ===`)
@@ -183,11 +282,19 @@ export async function runAgent() {
   console.log()
 
   let rounds = 0
+  let credFailed = false
+
   while (rounds < MAX_ROUNDS) {
     const currentTokens = getTokenCount().total
     if (currentTokens >= BUDGET * 0.9) {
       console.log(`\n⚠️ token 已用 ${currentTokens}/${BUDGET}，接近预算，提前收工。`)
       messages.push({ role: 'user', content: 'token 快不够了，直接 done 收工，总结一下今天做了什么。' })
+    }
+
+    if (credFailed) {
+      console.log(`\n⚠️ 凭据检查已失败，不再继续空转，直接 done 收工。`)
+      messages.push({ role: 'user', content: '刚才 deps/session 报告凭据缺失，已经无法执行任何操作了。直接 done 收工，写个 summary 告诉主人情况。' })
+      credFailed = false
     }
 
     rounds++
@@ -200,6 +307,7 @@ export async function runAgent() {
       ROUND_LOG(rounds, 'API 报错', e.message)
       messages.push({ role: 'assistant', content: `[API 报错] ${e.message}` })
       messages.push({ role: 'user', content: '刚才 API 报错了，done 收工吧。' })
+      compactHistory()
       continue
     }
 
@@ -217,6 +325,7 @@ export async function runAgent() {
         role: 'user',
         content: '继续吧，做完了调用 done 收工。',
       })
+      compactHistory()
       continue
     }
 
@@ -231,7 +340,10 @@ export async function runAgent() {
       if (fn.name === 'done') {
         console.log(`\n✅ 收工：${parsedArgs.summary || content || '(无总结)'}`)
         console.log(`💰 token: ${JSON.stringify(getTokenCount())}`)
-        return { rounds, tokens: getTokenCount(), summary: parsedArgs.summary || content || '' }
+        const finalTokens = getTokenCount()
+        saveTokens(finalTokens)
+        writeAgentState({ status: 'done', startAt: new Date().toISOString(), endAt: new Date().toISOString(), rounds, tokens: finalTokens, summary: parsedArgs.summary || content || '' })
+        return { rounds, tokens: finalTokens, summary: parsedArgs.summary || content || '' }
       }
 
       let toolResult
@@ -240,6 +352,13 @@ export async function runAgent() {
       } catch (e) {
         toolResult = `[工具报错] ${e.message}`
       }
+
+      const failSignals = ['credentials.json 不存在', 'cookie 不存在', '凭据缺失', '凭据文件不存在']
+      if ((fn.name === 'deps' || fn.name === 'session') && failSignals.some(s => toolResult.includes(s))) {
+        credFailed = true
+        console.log(`  🚫 deps/session 失败，下一轮直接 done`)
+      }
+
       ROUND_LOG(rounds, 'tool_result', `${toolResult.length} chars`)
 
       assistantMsg.tool_calls.push({
@@ -252,12 +371,18 @@ export async function runAgent() {
       messages.push({
         role: 'tool',
         tool_call_id: tc.id,
-        content: toolResult.slice(0, 3000),
+        content: toolResult.length > TOOL_MAX
+          ? toolResult.slice(0, TOOL_MAX) + `\n... (输出已截断，共 ${toolResult.length} 字符)`
+          : toolResult,
       })
+      compactHistory()
     }
   }
 
   console.log(`\n⏱️ 到达 ${MAX_ROUNDS} 轮上限，强制收工。`)
   console.log(`💰 token: ${JSON.stringify(getTokenCount())}`)
-  return { rounds, tokens: getTokenCount(), summary: '(强制收工)' }
+  const finalTokens = getTokenCount()
+  saveTokens(finalTokens)
+  writeAgentState({ status: 'forced', startAt: new Date().toISOString(), endAt: new Date().toISOString(), rounds, tokens: finalTokens, summary: '(强制收工)' })
+  return { rounds, tokens: finalTokens, summary: '(强制收工)' }
 }

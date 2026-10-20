@@ -3,6 +3,33 @@ import path from 'node:path'
 import os from 'node:os'
 import { spawn } from 'node:child_process'
 
+const REAL_USER_HOMEDIR = (() => {
+  const candidates = [
+    'C:\\Users\\Administrator',
+    'C:\\Users\\admin',
+    'C:\\root',
+    '/root',
+  ]
+  for (const h of candidates) {
+    try {
+      if (fs.existsSync(path.join(h, '.doubao-bot', 'credentials.json')) ||
+          fs.existsSync(path.join(h, '.bili-ai', 'credentials.json'))) {
+        return h
+      }
+    } catch {}
+  }
+  return os.homedir()
+})()
+
+function spawnEnv() {
+  const env = { ...process.env }
+  if (process.env.USERPROFILE !== REAL_USER_HOMEDIR) {
+    env.USERPROFILE = REAL_USER_HOMEDIR
+    env.HOME = REAL_USER_HOMEDIR
+  }
+  return env
+}
+
 const DATA_DIRS = [
   path.join(os.homedir(), '.doubao-bot'),
   'C:\\Users\\Administrator\\.doubao-bot',
@@ -112,6 +139,7 @@ export function runTask(task) {
     const proc = spawn(process.execPath, [script, JSON.stringify(task)], {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: process.cwd(),
+      env: spawnEnv(),
     })
     let out = '', err = ''
     proc.stdout.on('data', d => { out += d.toString(); process.stdout.write(`[task ${task.name}] ${d}`) })
@@ -170,6 +198,7 @@ export function startFollowWatcher() {
     const p = spawn(process.execPath, args, {
       cwd: process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: spawnEnv(),
     })
     p.stdout.on('data', d => process.stdout.write(d.toString()))
     p.stderr.on('data', d => process.stderr.write(d.toString()))

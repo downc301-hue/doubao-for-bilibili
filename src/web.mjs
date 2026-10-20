@@ -27,6 +27,33 @@ function resolveDataDir() {
   return candidates[0]
 }
 
+const REAL_USER_HOMEDIR = (() => {
+  const candidates = [
+    'C:\\Users\\Administrator',
+    'C:\\Users\\admin',
+    'C:\\root',
+    '/root',
+  ]
+  for (const h of candidates) {
+    try {
+      if (fs.existsSync(path.join(h, '.doubao-bot', 'credentials.json')) ||
+          fs.existsSync(path.join(h, '.bili-ai', 'credentials.json'))) {
+        return h
+      }
+    } catch {}
+  }
+  return os.homedir()
+})()
+
+function spawnEnv() {
+  const env = { ...process.env }
+  if (process.env.USERPROFILE !== REAL_USER_HOMEDIR) {
+    env.USERPROFILE = REAL_USER_HOMEDIR
+    env.HOME = REAL_USER_HOMEDIR
+  }
+  return env
+}
+
 function findFile(candidates) {
   for (const p of candidates) {
     try { if (fs.existsSync(p)) return p } catch {}
@@ -508,7 +535,7 @@ function runDaily(req, res) {
 
   const child = spawn('node', ['src/run-daily.mjs'], {
     cwd: path.resolve(__dirname, '..'),
-    env: { ...process.env, PATH: process.env.PATH },
+    env: spawnEnv(),
   })
 
   const sendEvent = (data) => {
@@ -547,6 +574,7 @@ function runTool(res, args) {
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
   const child = spawn('node', ['tools/bili.mjs', ...args], {
     cwd: path.resolve(__dirname, '..'),
+    env: spawnEnv(),
   })
   child.stdout.on('data', (b) => res.write(b))
   child.stderr.on('data', (b) => res.write(b))
@@ -654,11 +682,11 @@ main{max-width:1200px;margin:32px auto;padding:0 28px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
 .stat{background:var(--c-bg3);border-radius:12px;padding:20px}
 .stat .label{font-size:15px;color:var(--c-text-dim)}
-.stat .value{font-size:30px;font-weight:600;margin-top:6px}
+.stat .value{font-size:44px;font-weight:700;margin-top:4px;letter-spacing:-1px}
 .stat.ok .value{color:var(--c-ok)}
 .stat.warn .value{color:var(--c-warn)}
 .stat.err .value{color:var(--c-err)}
-.bar{height:10px;background:var(--c-bg4);border-radius:5px;margin-top:12px;overflow:hidden}
+.bar{height:12px;background:var(--c-bg4);border-radius:5px;margin-top:12px;overflow:hidden}
 .bar>div{height:100%;background:var(--c-accent);border-radius:5px;transition:width .3s}
 .bar.warn>div{background:linear-gradient(90deg,var(--c-warn),#ff7a45)}
 .bar.crit>div{background:linear-gradient(90deg,#ff7a45,var(--c-err))}
@@ -1352,7 +1380,7 @@ async function runTool(kind){
     q=document.getElementById('tool-whois-mid'); if(!q)return
     var v=q.value.trim()
     if(!v){ toast('请输入 UP 主 MID','error'); q.focus(); q.style.borderColor='#ff6b6b'; return }
-    if(!/^\d+$/.test(v)){ toast('MID 必须是纯数字','error'); q.focus(); q.select(); q.style.borderColor='#ff6b6b'; return }
+    if(!/^\\d+$/.test(v)){ toast('MID 必须是纯数字','error'); q.focus(); q.select(); q.style.borderColor='#ff6b6b'; return }
     q.style.borderColor=''
     url='/tools/whois?mid='+v; label='MID: '+v
   }else if(kind==='feed'){
