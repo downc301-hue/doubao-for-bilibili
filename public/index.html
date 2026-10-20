@@ -179,6 +179,20 @@
   </div>
 
   <div class="card">
+    <h2>📝 活动日记 <span id="diary-auto-tag" class="tag">加载中</span></h2>
+    <p class="mini">自动日记已关闭。点击下方按钮，基于今天的工具调用记录（看过哪些视频、评论、关注变化等），让豆包生成一篇总结性日记写入日志。</p>
+    <div class="row">
+      <label>自动日记</label>
+      <label class="switch"><input type="checkbox" id="diary-auto-cb"><span></span></label>
+      <span class="mini">关闭后分身不会被强制写日记，节省 token</span>
+    </div>
+    <div class="row">
+      <button class="btn" id="btn-gen-diary">✨ 生成今日日记总结</button>
+    </div>
+    <div id="diary-gen-result" class="mini" style="display:none;margin-top:8px"></div>
+  </div>
+
+  <div class="card">
     <h2>用户信息</h2>
     <div class="row">
       <label>B 站昵称</label>

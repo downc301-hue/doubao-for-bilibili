@@ -179,6 +179,53 @@ var btnSaveC=document.getElementById('btn-save-owner');if(btnSaveC)btnSaveC.oncl
   alert('已保存');renderDashboard();
 };
 
+var diaryAutoCb=document.getElementById('diary-auto-cb');
+var diaryAutoTag=document.getElementById('diary-auto-tag');
+if(diaryAutoCb){
+  (async function(){
+    var cfg=await fetch('/config').then(function(r){return r.json()});
+    var auto=cfg.diary?cfg.diary.auto!==false:true;
+    diaryAutoCb.checked=auto;
+    if(diaryAutoTag){
+      diaryAutoTag.textContent=auto?'自动日记：开':'自动日记：关';
+      diaryAutoTag.className='tag '+(auto?'online':'offline');
+    }
+  })();
+  diaryAutoCb.onchange=async function(){
+    var body={diary:{auto:diaryAutoCb.checked}};
+    await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(diaryAutoTag){
+      diaryAutoTag.textContent=diaryAutoCb.checked?'自动日记：开':'自动日记：关';
+      diaryAutoTag.className='tag '+(diaryAutoCb.checked?'online':'offline');
+    }
+    toast('自动日记已'+(diaryAutoCb.checked?'开启':'关闭'),'ok');
+  };
+}
+var btnGenDiary=document.getElementById('btn-gen-diary');
+if(btnGenDiary){
+  btnGenDiary.onclick=async function(){
+    btnGenDiary.disabled=true;btnGenDiary.textContent='正在生成...';
+    var resultDiv=document.getElementById('diary-gen-result');
+    try{
+      var r=await fetch('/api/generate-diary',{method:'POST'}).then(function(r){return r.json()});
+      if(r.ok){
+        btnGenDiary.textContent='✨ 生成完成！';
+        resultDiv.style.display='block';
+        resultDiv.style.color='#52c41a';
+        resultDiv.textContent='已写入 '+r.count+' 条日记事件。'+(r.note||'');
+        toast('日记生成成功 ✓','ok');
+        setTimeout(function(){btnGenDiary.disabled=false;btnGenDiary.textContent='✨ 生成今日日记总结';loadDiary();},2000);
+      }else{
+        throw new Error(r.error||'生成失败');
+      }
+    }catch(e){
+      btnGenDiary.disabled=false;btnGenDiary.textContent='✨ 生成今日日记总结';
+      resultDiv.style.display='block';resultDiv.style.color='#ff4d4f';resultDiv.textContent=e.message;
+      toast('生成失败：'+e.message,'error');
+    }
+  };
+}
+
 var btnSaveFW=document.getElementById('btn-save-fw');if(btnSaveFW)btnSaveFW.onclick=async function(){
   var body={
     enabled:document.getElementById('fw-enabled').checked,

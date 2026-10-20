@@ -107,6 +107,99 @@ const DATA_DIR = resolveDataDir()
 const PORT = process.env.PORT || 7890
 const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version || '0.0.0'
 
+function readToolLog() {
+  const p = path.join(DATA_DIR, 'tool-log.jsonl')
+  if (!fs.existsSync(p)) return []
+  try {
+    return fs.readFileSync(p, 'utf8').trim().split('\n').map(l => {
+      try { return JSON.parse(l) } catch { return null }
+    }).filter(Boolean)
+  } catch { return [] }
+}
+
+function bjDate(iso) {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' })
+  } catch { return '' }
+}
+
+function summarizeTools(tools) {
+  const out = { videos: [], ups: [], comments: [], follows: 0, unfollows: 0, dms: [] }
+  const seenBv = new Set()
+  const seenUp = new Set()
+  for (const e of tools) {
+    const t = e.tool || e.name || ''
+    const a = e.args || {}
+    if (t === 'debrief' || t === 'search') {
+      const bv = a.bv || a.bvid || ''
+      if (bv && !seenBv.has(bv)) {
+        seenBv.add(bv)
+        const title = a.title || (typeof a === 'string' ? '' : '')
+        out.videos.push({ bv, title: String(title).slice(0, 60) })
+      }
+    }
+    if (t === 'feed') {
+      const list = a.list || a.items || []
+      for (const item of (Array.isArray(list) ? list : [])) {
+        const bv = item.bvid || item.bv || ''
+        const up = item.author || item.up_name || item.up || ''
+        if (bv && !seenBv.has(bv)) {
+          seenBv.add(bv)
+          out.videos.push({ bv, title: String(item.title || '').slice(0, 60), up: String(up).slice(0, 30) })
+        }
+        if (up && !seenUp.has(up)) { seenUp.add(up); out.ups.push(String(up).slice(0, 30)) }
+      }
+    }
+    if (t === 'comment') {
+      out.comments.push({ bv: a.bv || a.bvid || '', text: String(a.text || '').slice(0, 80), go: a.go === true })
+    }
+    if (t === 'follow') out.follows++
+    if (t === 'unfollow') out.unfollows++
+    if (t === 'dm') out.dms.push({ to: a.to || a.mid || '', text: String(a.text || '').slice(0, 80) })
+  }
+  return out
+}
+
+function buildDiaryPrompt(cfg, s) {
+  const owner = cfg.bili?.ownerName || '主人'
+  const lines = [
+    `今天我作为 ${owner} 的B站分身，活动记录摘要如下，请帮我写一篇日记总结。`,
+    '',
+  ]
+  if (s.videos.length) {
+    lines.push(`**看过的视频（${s.videos.length}条）：**`)
+    for (const v of s.videos) lines.push(`  - ${v.bv} ${v.title || ''}${v.up ? ' UP主:' + v.up : ''}`)
+    lines.push('')
+  }
+  if (s.comments.length) {
+    lines.push(`**评论（${s.comments.length}条）：**`)
+    for (const c of s.comments) lines.push(`  - ${c.bv} "${c.text}" ${c.go ? '(已真发)' : '(dry-run)'}`)
+    lines.push('')
+  }
+  if (s.dms.length) {
+    lines.push(`**私信（${s.dms.length}条）：**`)
+    for (const d of s.dms) lines.push(`  - 给 ${d.to}: "${d.text}"`)
+    lines.push('')
+  }
+  if (s.follows || s.unfollows) {
+    lines.push(`**关注变化：** +${s.follows} -${s.unfollows}`)
+    lines.push('')
+  }
+  if (s.ups.length) {
+    lines.push(`**刷到的UP主：** ${s.ups.slice(0, 10).join('、')}`)
+    lines.push('')
+  }
+  lines.push('请生成一篇日记总结，包含：')
+  lines.push('1. kind=summary（必须，放在最前）：一两句话总结今天整体干了啥、心情怎么样')
+  lines.push('2. kind=thought：今天印象最深的视频/内容 + 你的真实感受（像人写的，几百字）')
+  lines.push('3. kind=comment：实际发出的每条评论，target填BV号，note填你发了什么')
+  lines.push('4. kind=feeling：碎碎念/心情')
+  lines.push('')
+  lines.push('格式：每条一行 JSON，字段 {kind, note, target(可选)}。不要 markdown，直接输出 JSONL。')
+  return lines.join('\n')
+}
+
 let _agentChild = null
 function abortAgentRun() {
   if (_agentChild) {
@@ -231,6 +324,7 @@ async function api(req, res, pathname) {
     if (body.bili?.ownerName) cfg.bili.ownerName = body.bili.ownerName
     if (body.bili?.sessionCookie) cfg.bili.sessionCookie = body.bili.sessionCookie
     if (body.persona) cfg.persona = body.persona
+    if (body.diary) cfg.diary = body.diary
     setJson('config.json', cfg)
     return send(res, 200, JSON.stringify({ ok: true }))
   }
@@ -590,6 +684,56 @@ async function api(req, res, pathname) {
     const mid = Number(body.mid)
     if (!mid) return send(res, 400, JSON.stringify({ error: 'mid required' }))
     return biliModifyRelation(res, mid, 2)
+  }
+  if (pathname === '/api/generate-diary' && req.method === 'POST') {
+    const creds = getJson('credentials.json')
+    if (!creds.doubaoApiKey) return send(res, 400, JSON.stringify({ error: '未配置豆包 API Key' }))
+    const today = bjDate(new Date().toISOString())
+    const tools = readToolLog().filter(e => bjDate(e.time || e.at) === today)
+    if (tools.length === 0) return send(res, 400, JSON.stringify({ error: '今天还没有任何工具调用记录' }))
+    const summary = summarizeTools(tools)
+    const cfg = getJson('config.json')
+    const prompt = buildDiaryPrompt(cfg, summary)
+    try {
+      const r = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + creds.doubaoApiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: creds.doubaoEndpointId || '',
+          messages: [
+            { role: 'system', content: `你是主人（${cfg.bili?.ownerName || ''}）的B站分身。主人让你根据今天的活动记录，写一篇结构化的日记总结。` },
+            { role: 'user', content: prompt },
+          ],
+          max_tokens: 1500,
+        })
+      })
+      const j = await r.json()
+      const text = j?.choices?.[0]?.message?.content || ''
+      if (!text) return send(res, 500, JSON.stringify({ error: '豆包返回空', raw: JSON.stringify(j).slice(0, 200) }))
+      const whaleDir = path.join(os.homedir(), '.dsh')
+      if (!fs.existsSync(whaleDir)) fs.mkdirSync(whaleDir, { recursive: true })
+      const whalePath = path.join(whaleDir, 'whale-log.jsonl')
+      const now = new Date()
+      const parsed = []
+      for (const line of text.split('\n').map(l => l.trim()).filter(Boolean)) {
+        try {
+          if (line.startsWith('{')) { const obj = JSON.parse(line); if (obj.kind && obj.note) parsed.push(obj); continue }
+        } catch {}
+        const m = line.match(/^\*\*(summary|thought|comment|feeling|wake|action)\*\*[:：]?\s*(.+)$/)
+        if (m) parsed.push({ kind: m[1], note: m[2] })
+      }
+      const toWrite = parsed.length > 0 ? parsed : [{ kind: 'summary', note: text }]
+      let i = 0
+      for (const ev of toWrite) {
+        const at = new Date(now.getTime() + i * 1000).toISOString()
+        const line = JSON.stringify({ at, kind: ev.kind, note: String(ev.note || '').slice(0, 1000), ...(ev.target ? { target: ev.target } : {}) })
+        fs.appendFileSync(whalePath, line + '\n')
+        i++
+      }
+      return send(res, 200, JSON.stringify({ ok: true, count: toWrite.length, note: text.slice(0, 200) }))
+    } catch (e) {
+      return send(res, 500, JSON.stringify({ error: String(e.message) }))
+    }
   }
 
   return send(res, 404, JSON.stringify({ error: 'not found' }))
