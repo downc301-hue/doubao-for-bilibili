@@ -603,7 +603,7 @@ function _renderTrajectory(d){
   h+='<div style="padding:12px;font-size:12.5px;font-family:monospace;color:#d0d4dc;line-height:1.75">';
   if(d.runs&&d.runs.length){
     h+='<div style="font-weight:700;margin:6px 0 6px;color:#fff">📋 活动流水 ('+d.runs.length+')</div>';
-    d.runs.slice(-30).forEach(function(r){
+    d.runs.slice(-30).reverse().forEach(function(r){
       var t=_bjTime(r.time);
       var ic=r.event==='start'?'🚀':r.event==='round'?'🔄':r.event==='tool'?'🛠️':r.event==='done'?'✅':r.event==='aborted'?'🛑':r.event==='api_error'?'❌':r.event==='forced'?'🛑':(r.event||'💭');
       var col=r.event==='tool'?'#38bdf8':r.event==='api_error'?'#ff4d4f':r.event==='done'?'#52c41a':r.event==='thought'?'#c9d1d9':'#c9d1d9';
@@ -617,7 +617,7 @@ function _renderTrajectory(d){
   }
   if(d.tools&&d.tools.length){
     h+='<div style="font-weight:700;margin:12px 0 6px;color:#fff">🛠️ 工具调用</div>';
-    d.tools.slice(-15).forEach(function(t){
+    d.tools.slice(-15).reverse().forEach(function(t){
       var ti=_bjTime(t.time);
       var col=t.status==='ok'?'#52c41a':t.status==='warn'?'#faad14':'#ff4d4f';
       h+='<div style="color:'+col+';margin:2px 0">'+ti+' ['+t.status+'] '+t.label+': '+t.resultSize+'chars '+t.durationMs+'ms</div>';
