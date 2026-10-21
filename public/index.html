@@ -4,11 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>豆包 B站分身 · 控制台</title>
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=0.5.0">
 <link rel="stylesheet" href="iconfont.css?v=0.4.6">
 <script>
 (function(){
-  var t=localStorage.getItem('theme')||'dark';
+  var t=localStorage.getItem('theme')||'light';
   var s=localStorage.getItem('fs')||'19';
   document.documentElement.setAttribute('data-theme',t);
   document.documentElement.style.setProperty('--fs-base',s+'px');
@@ -16,372 +16,480 @@
 </script>
 </head>
 <body>
-<header style="display:flex;justify-content:space-between;align-items:center">
-  <div>
-    <h1><span class="iconfont icon-doubao" style="font-size:22px;vertical-align:-6px;color:#ff6b35;margin-right:6px"></span>豆包 B站分身 <span class="ver-badge" id="ver-badge">v0.0.0</span></h1>
-    <p>自主刷B站 · 自己写日记 · 帮用户引流</p>
-  </div>
-  <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-    <div style="display:flex;gap:8px;align-items:center">
-      <button onclick="testCreds()" id="btn-test-creds" style="padding:6px 14px;background:#52c41a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px"><span class="iconfont icon-link" style=""></span> 测试凭据</button>
-      <button onclick="abortAgent()" id="btn-abort" style="padding:6px 14px;background:#ff4d4f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px"><span class="iconfont icon-close" style=""></span> 中止AI</button>
-      <button onclick="showTrajectory()" style="padding:6px 14px;background:#1890ff;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px"><span class="iconfont icon-trajectory" style=""></span> 查看轨迹</button>
-      <span id="creds-test-result" style="margin-left:6px;font-size:13px;vertical-align:middle;color:#c9d1d9"></span>
-    </div>
-    <div class="theme-bar">
-      <button id="btn-fs-sm" title="小字体">小</button>
-      <button id="btn-fs-md" title="中字体" class="active">中</button>
-      <button id="btn-fs-lg" title="大字体">大</button>
-      <button id="btn-theme" title="切换明/暗模式"><span class="iconfont icon-moon" style="font-size:16px"></span></button>
-    </div>
-  </div>
-</header>
-<main>
+<div class="app-layout">
 
-<div class="tabs">
-  <div class="tab active" data-tab="overview">概览</div>
-  <div class="tab" data-tab="run">唤醒分身</div>
-  <div class="tab" data-tab="diary">日记</div>
-  <div class="tab" data-tab="tasks">定时任务</div>
-  <div class="tab" data-tab="config">设置</div>
-  <div class="tab" data-tab="creds">凭据</div>
-  <div class="tab" data-tab="tools">工具</div>
+  <!-- ===== 左侧边栏 ===== -->
+  <aside class="sidebar">
+    <div class="sb-brand">
+      <img src="/doubao.svg" alt="豆包" class="sb-logo">
+      <div class="sb-brand-text">
+        <div class="sb-name">豆包 B站分身</div>
+        <span class="ver-badge" id="ver-badge">v0.0.0</span>
+      </div>
+    </div>
+    <nav class="sb-nav">
+      <div class="tab active" data-tab="overview"><span class="iconfont icon-shouye"></span><span class="tab-label">概览</span></div>
+      <div class="tab" data-tab="run"><span class="iconfont icon-play"></span><span class="tab-label">唤醒分身</span></div>
+      <div class="tab" data-tab="diary"><span class="iconfont icon-diary"></span><span class="tab-label">日记</span></div>
+      <div class="tab" data-tab="tasks"><span class="iconfont icon-calendar"></span><span class="tab-label">定时任务</span></div>
+      <div class="tab" data-tab="config"><span class="iconfont icon-settings"></span><span class="tab-label">设置</span></div>
+      <div class="tab" data-tab="creds"><span class="iconfont icon-link"></span><span class="tab-label">凭据</span></div>
+      <div class="tab" data-tab="tools"><span class="iconfont icon-work"></span><span class="tab-label">工具</span></div>
+    </nav>
+    <img class="sb-mascot" id="sb-mascot" src="/doubao.png" alt="">
+    <div class="sb-footer">
+      <img src="/doubao.svg" alt="" class="sb-avatar">
+      <div class="sb-user-info">
+        <div class="sb-user-name" id="bili-uname">加载中…</div>
+        <div class="sb-user-desc">B站小号 · 养号中</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== 右侧主体 ===== -->
+  <div class="app-main">
+
+    <header class="topbar">
+      <div class="tb-left"></div>
+      <div class="tb-actions">
+        <button onclick="testCreds()" id="btn-test-creds" class="tb-btn ok"><span class="iconfont icon-link"></span> 测试凭据</button>
+        <button onclick="abortAgent()" id="btn-abort" class="tb-btn danger"><span class="iconfont icon-close"></span> 中止AI</button>
+        <button onclick="showTrajectory()" class="tb-btn info"><span class="iconfont icon-trajectory"></span> 查看轨迹</button>
+        <span id="creds-test-result" class="tb-result"></span>
+        <div class="theme-bar">
+          <button id="btn-mascot-set" title="形象设置"><span class="iconfont icon-star-book"></span></button>
+          <button id="btn-fs-sm" title="小字体">小</button>
+          <button id="btn-fs-md" title="中字体" class="active">中</button>
+          <button id="btn-fs-lg" title="大字体">大</button>
+          <button id="btn-theme" title="切换明/暗模式"><span class="iconfont icon-moon"></span></button>
+        </div>
+        <!-- 形象设置面板 -->
+        <div class="mascot-panel card" id="mascot-panel" style="display:none">
+          <div class="mp-title">形象设置</div>
+          <div class="mp-label">形象</div>
+          <div class="mp-grid" id="mp-grid"></div>
+          <div class="mp-label">位置</div>
+          <div class="mp-pos" id="mp-pos">
+            <button data-pos="sidebar">左侧栏</button>
+            <button data-pos="float">右下角</button>
+            <button data-pos="hide">隐藏</button>
+          </div>
+          <div class="mp-label">大小 <span class="mp-val" id="mp-scale-val">100%</span></div>
+          <input type="range" class="mp-slider" id="mp-scale" min="30" max="150" value="100">
+          <div class="mp-label">上下 <span class="mp-val" id="mp-offset-val">0px</span></div>
+          <input type="range" class="mp-slider" id="mp-offset" min="-150" max="400" value="0">
+          <div class="mp-label">左右 <span class="mp-val" id="mp-x-val">0px</span></div>
+          <input type="range" class="mp-slider" id="mp-x" min="-200" max="200" value="0">
+          <div class="mp-label">透明度 <span class="mp-val" id="mp-opacity-val">100%</span></div>
+          <input type="range" class="mp-slider" id="mp-opacity" min="10" max="100" value="100">
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+
+      <!-- ===== 概览 ===== -->
+      <div class="pane active" id="pane-overview">
+        <div class="ov-grid">
+          <div class="ov-left">
+            <div class="hero-card">
+              <div class="hero-text">
+                <h2>你好！我是豆包</h2>
+                <p>你的 B 站 AI 分身 · 正在努力养号引流中</p>
+                <div class="hero-chips">
+                  <span class="hero-chip" data-goto="run" data-then="btn-run"><span class="iconfont icon-play"></span> 继续养号</span>
+                  <span class="hero-chip" data-goto="diary"><span class="iconfont icon-diary"></span> 查看日记</span>
+                  <span class="hero-chip" data-goto="overview" data-scroll="at-me-list"><span class="iconfont icon-message"></span> 回复评论</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2><span class="iconfont icon-checkbox"></span>今日养号进度 <span id="daily-date" class="h2-sub"></span></h2>
+              <div id="daily-report" class="daily-report-grid">
+                <div class="mini-stat" data-role="archives">
+                  <div class="mini-icon"><span class="iconfont icon-bookmark-check"></span></div>
+                  <div class="mini-num" data-target="0">0</div>
+                  <div class="mini-label">三连（喜欢+收藏+分享）</div>
+                  <div class="mini-bar"><div></div></div>
+                </div>
+                <div class="mini-stat" data-role="danmus">
+                  <div class="mini-icon"><span class="iconfont icon-message"></span></div>
+                  <div class="mini-num" data-target="0">0</div>
+                  <div class="mini-label">弹幕</div>
+                  <div class="mini-bar"><div></div></div>
+                </div>
+                <div class="mini-stat" data-role="comments">
+                  <div class="mini-icon"><span class="iconfont icon-edit-pen"></span></div>
+                  <div class="mini-num" data-target="0">0</div>
+                  <div class="mini-label">评论</div>
+                  <div class="mini-bar"><div></div></div>
+                </div>
+                <div class="mini-stat" data-role="interactions">
+                  <div class="mini-icon"><span class="iconfont icon-checkbox"></span></div>
+                  <div class="mini-num" data-target="0">0</div>
+                  <div class="mini-label">今日互动总计</div>
+                  <div class="mini-bar total"><div></div></div>
+                </div>
+              </div>
+              <div class="plan-strip" id="daily-plan">
+                <span id="plan-text">加载中...</span>
+              </div>
+              <div id="daily-actions" class="actions-log"></div>
+            </div>
+
+            <div class="card">
+              <h2><span class="iconfont icon-deepseek"></span> 主人的艾特 <span id="at-me-badge" class="tag offline">加载中</span></h2>
+              <p class="mini">好钢用在刀刃上——只回复主人的艾特，其他人的一律不回。点击"一键回复"让豆包生成合适的评论并自动发出。</p>
+              <div class="row" style="margin-top:8px">
+                <button class="btn ghost" onclick="loadAtMe()"><span class="iconfont icon-refresh"></span> 刷新艾特</button>
+              </div>
+              <div id="at-me-list" style="margin-top:12px">正在拉取主人的 @ 列表...</div>
+            </div>
+
+            <div class="card" id="latest-diary-card" style="display:none">
+              <h2 id="latest-diary-title">最新日记</h2>
+              <div id="latest-diary-body"></div>
+            </div>
+          </div>
+
+          <div class="ov-right">
+            <div class="card">
+              <h2><span class="iconfont icon-target"></span>系统状态</h2>
+              <div class="grid grid-rail">
+                <div class="stat clickable" id="stat-tokens" onclick="showTokenChart()" title="点击查看消耗趋势">
+                  <div class="label">今日 Token / 预算 <span class="hint-link"><span class="iconfont icon-ranking"></span></span></div>
+                  <div class="value" id="stat-tokens-value">-- / --</div>
+                  <div class="bar" id="stat-tokens-bar"><div style="width:0%"></div></div>
+                </div>
+                <div class="stat" id="stat-doubao">
+                  <div class="label">豆包 API</div>
+                  <div class="value" id="stat-doubao-value">加载中...</div>
+                </div>
+                <div class="stat" id="stat-bili-api">
+                  <div class="label">B站接口</div>
+                  <div class="value" id="stat-bili-api-value">加载中...</div>
+                </div>
+                <div class="stat" id="stat-user">
+                  <div class="label">主人</div>
+                  <div class="value" id="stat-user-value">加载中...</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2><span class="iconfont icon-plus-follow"></span> 小号生态</h2>
+              <div id="bili-stats" class="bili-stats-grid">
+                <div class="mini-stat bili-green" data-role="following">
+                  <div class="mini-icon"><span class="iconfont icon-add-friend"></span></div>
+                  <div class="mini-num" data-target="0">0</div>
+                  <div class="mini-label">关注（带的人）</div>
+                </div>
+                <div class="mini-stat bili-pink" data-role="follower">
+                  <div class="mini-icon"><span class="iconfont icon-vip"></span></div>
+                  <div class="mini-num" data-target="0">0</div>
+                  <div class="mini-label">粉丝（带小号的人）</div>
+                </div>
+                <div class="mini-stat bili-yellow" data-role="likes">
+                  <div class="mini-icon"><span class="iconfont icon-heart"></span></div>
+                  <div class="mini-num" data-target="0">0</div>
+                  <div class="mini-label">累计被点赞</div>
+                </div>
+                <div class="mini-stat bili-blue" data-role="at">
+                  <div class="mini-icon"><span class="iconfont icon-bell"></span></div>
+                  <div class="mini-num" data-target="0">0</div>
+                  <div class="mini-label">未读 @ 你</div>
+                </div>
+                <div class="mini-stat bili-purple" data-role="reply">
+                  <div class="mini-icon"><span class="iconfont icon-qa"></span></div>
+                  <div class="mini-num" data-target="0">0</div>
+                  <div class="mini-label">未读 回复</div>
+                </div>
+                <div class="mini-stat bili-cyan" data-role="likeReply">
+                  <div class="mini-icon"><span class="iconfont icon-thumb-up"></span></div>
+                  <div class="mini-num" data-target="0">0</div>
+                  <div class="mini-label">回复被点赞</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2><span class="iconfont icon-faxian"></span>快捷操作</h2>
+              <div class="quick-actions">
+                <button class="btn ghost" data-goto="diary" data-then="btn-export-log"><span class="iconfont icon-download"></span> 导出日志素材</button>
+                <button class="btn ghost" data-goto="run" data-then="btn-run"><span class="iconfont icon-play"></span> 手动唤醒分身</button>
+                <button class="btn ghost" data-goto="config" data-scroll="btn-gen-diary"><span class="iconfont icon-edit-note"></span> 生成今日日记</button>
+                <button class="btn ghost" onclick="location.reload()"><span class="iconfont icon-refresh"></span> 刷新面板</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 唤醒分身 ===== -->
+      <div class="pane" id="pane-run">
+        <div class="card">
+          <h2>一键唤醒分身</h2>
+          <p class="mini">点击按钮后，分身将自动执行「醒来 → 选题 → 深读 → 评论 → 写日记」全流程。下方会实时输出运行日志。</p>
+          <div class="row" style="margin-top:12px">
+            <button class="btn" id="btn-run">现在就唤醒</button>
+            <span id="run-status" class="tag offline">待运行</span>
+          </div>
+          <div id="run-log">点击上方按钮开始运行...</div>
+        </div>
+      </div>
+
+      <!-- ===== 日记 ===== -->
+      <div class="pane" id="pane-diary">
+        <div class="card">
+          <h2><span class="iconfont icon-diary"></span> 日志素材导出</h2>
+          <p class="mini">把今天的数据（账号增量、行为统计、Token、评论明细、异常）拼成一段草稿，复制后改一改就是 Day N 文章。纯本地统计，零 token。</p>
+          <div class="row">
+            <button class="btn" id="btn-export-log">生成日志素材</button>
+            <span class="mini" id="export-log-tip"></span>
+          </div>
+          <textarea id="export-log-box" style="display:none;width:100%;height:320px;margin-top:10px;padding:12px;border:1px solid var(--c-border2);border-radius:8px;font-size:13px;line-height:1.7;font-family:inherit;resize:vertical"></textarea>
+        </div>
+        <div class="card">
+          <h2>分身日记（跨天记忆）</h2>
+          <div id="diary-list">加载中...</div>
+        </div>
+      </div>
+
+      <!-- ===== 定时任务 ===== -->
+      <div class="pane" id="pane-tasks">
+        <div class="card">
+          <h2>定时抢番任务</h2>
+          <p class="mini" style="margin-bottom:16px;">调度器每 60 秒扫一次任务表，到点自动触发。进程在 Web 服务启动时常驻运行。</p>
+          <div id="task-list">加载中...</div>
+        </div>
+
+        <div class="card">
+          <h2>新增任务</h2>
+          <div class="row">
+            <label>任务名称</label>
+            <input id="tk-name" placeholder="例如：凡人修仙传" style="flex:1">
+          </div>
+          <div class="row">
+            <label>视频链接</label>
+            <input id="tk-target-url" placeholder="番剧主页 ss 链接 / 单集 BV 链接（填 ss 自动解析最新正片）" style="flex:1">
+          </div>
+          <div class="row">
+            <label>更新日</label>
+            <select id="tk-day" style="flex:1">
+              <option value="0">周日</option><option value="1">周一</option><option value="2">周二</option>
+              <option value="3">周三</option><option value="4">周四</option><option value="5">周五</option>
+              <option value="6" selected>周六</option>
+            </select>
+          </div>
+          <div class="row">
+            <label>上线时间</label>
+            <input id="tk-time" type="time" value="11:00" style="flex:1">
+          </div>
+          <div class="row">
+            <label>提前量</label>
+            <input id="tk-lead" type="number" value="20" min="0" max="120" style="flex:1">
+            <span class="mini">分钟</span>
+          </div>
+          <div class="row">
+            <label>关联视频</label>
+            <input id="tk-owner-ref" placeholder="可选：引流用的 BV 号" style="flex:1">
+          </div>
+          <div class="row" style="align-items:flex-start">
+            <label>预设文案</label>
+            <textarea id="tk-template" rows="3" style="flex:1" placeholder="留空让 AI 自由发挥，例如：前排占位，等 UP 主翻牌~"></textarea>
+          </div>
+          <div class="row">
+            <label>备注</label>
+            <input id="tk-desc" placeholder="可选，给 AI 的额外指令" style="flex:1">
+          </div>
+          <div style="margin-top:16px">
+            <button class="btn primary" id="tk-save-btn" onclick="saveTask()">保存任务</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 设置 ===== -->
+      <div class="pane" id="pane-config">
+        <div class="card">
+          <h2>人设与偏好</h2>
+          <div class="row">
+            <label>分身昵称</label>
+            <input id="cf-name" value="">
+          </div>
+          <div class="row">
+            <label>性格标签</label>
+            <input id="cf-tags" value="" placeholder="如：爱刷AI视频, 喜欢猫咪, 话不多">
+          </div>
+          <div class="row">
+            <label>喜欢的内容</label>
+            <input id="cf-like" value="">
+          </div>
+          <div class="row">
+            <label>不喜欢的内容</label>
+            <input id="cf-dislike" value="">
+          </div>
+          <button class="btn" id="btn-save-persona">保存人设</button>
+        </div>
+
+        <div class="card">
+          <h2>Token 预算</h2>
+          <div class="row">
+            <label>每日预算</label>
+            <input id="cf-budget" type="number" value="">
+          </div>
+          <button class="btn" id="btn-save-budget">保存预算</button>
+        </div>
+
+        <div class="card">
+          <h2><span class="iconfont icon-edit-pen"></span> 活动日记 <span id="diary-auto-tag" class="tag">加载中</span></h2>
+          <p class="mini">自动日记已关闭。点击下方按钮，基于今天的工具调用记录（看过哪些视频、评论、关注变化等），让豆包生成一篇总结性日记写入日志。</p>
+          <div class="row">
+            <label>自动日记</label>
+            <label class="switch"><input type="checkbox" id="diary-auto-cb"><span></span></label>
+            <span class="mini">关闭后分身不会被强制写日记，节省 token</span>
+          </div>
+          <div class="row">
+            <button class="btn" id="btn-gen-diary"><span class="iconfont icon-diary"></span> 生成今日日记总结</button>
+          </div>
+          <div id="diary-gen-result" class="mini" style="display:none;margin-top:8px"></div>
+        </div>
+
+        <div class="card">
+          <h2>用户信息</h2>
+          <div class="row">
+            <label>B 站昵称</label>
+            <input id="cf-owner-name" value="">
+          </div>
+          <div class="row">
+            <label>B 站 UID</label>
+            <input id="cf-owner-mid" value="">
+          </div>
+          <button class="btn" id="btn-save-owner">保存用户信息</button>
+        </div>
+
+        <div class="card">
+          <h2><span class="iconfont icon-play"></span> 关注列表抢前排 <span id="fw-status" class="tag offline">加载中</span></h2>
+          <p class="mini">后台 0 token 守望关注的 UP 主，一旦有新投稿立刻用预设文案抢前排。Web 服务启动时自动拉起。</p>
+          <div class="row">
+            <label>启用守望</label>
+            <label class="switch"><input type="checkbox" id="fw-enabled"><span></span></label>
+          </div>
+          <div class="row">
+            <label>扫一眼频率</label>
+            <input id="fw-interval" type="number" min="180" step="30" value="">
+            <span class="mini">秒（最少 180 秒，防 B 站限频）</span>
+          </div>
+          <div class="row">
+            <label>仅白名单</label>
+            <label class="switch"><input type="checkbox" id="fw-ol"><span></span></label>
+            <span class="mini">只响应下面白名单的 UP 主 MID（关闭则响应所有关注）</span>
+          </div>
+          <div class="row">
+            <label>养号模式</label>
+            <label class="switch"><input type="checkbox" id="fw-nc"><span></span></label>
+            <span class="mini">三连+弹幕照常，只关掉评论。新号先养一周再开评论</span>
+          </div>
+          <div class="row">
+            <label>白名单 MID</label>
+            <input id="fw-wl" value="" placeholder="如 123456, 789012">
+          </div>
+          <div class="row">
+            <label>黑名单 MID</label>
+            <input id="fw-bl" value="" placeholder="永远不响应的 UP 主 MID">
+          </div>
+          <div class="row" style="align-items:flex-start">
+            <label>评论模板</label>
+            <textarea id="fw-templates" rows="4" placeholder="每行一条，随机选一条发"></textarea>
+          </div>
+          <div class="row">
+            <button class="btn" id="btn-save-fw">保存并重启守望</button>
+            <button class="btn ghost" onclick="testFollowFetch()">测试拉一次关注列表</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 凭据 ===== -->
+      <div class="pane" id="pane-creds">
+        <div class="card">
+          <h2>豆包 API</h2>
+          <p class="mini">在 <a href="https://console.volcengine.com/ark" target="_blank">火山方舟控制台</a> 创建 API Key 和接入点。</p>
+          <div class="row">
+            <label>API Key</label>
+            <input id="cred-doubao-key" type="password" placeholder="sk-... （粘贴后自动隐藏）">
+          </div>
+          <div class="row">
+            <label>Endpoint ID</label>
+            <input id="cred-endpoint" value="" placeholder="ep-2025xxxxxx-xxxxx">
+          </div>
+          <button class="btn" id="btn-save-doubao">保存豆包凭据</button>
+        </div>
+
+        <div class="card">
+          <h2>B站小号 Cookie</h2>
+          <p class="mini">浏览器登录小号 → F12 → Application → Cookies → bilibili.com → 复制整行 Cookie 粘贴进来。</p>
+          <textarea id="cred-bili-cookie" placeholder="buvid3=...; SESSDATA=...; bili_jct=..."></textarea>
+          <div class="row" style="margin-top:10px">
+            <button class="btn" id="btn-save-bili">保存 B站 Cookie</button>
+            <span id="bili-status" class="tag offline">未配置</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 工具 ===== -->
+      <div class="pane" id="pane-tools">
+        <div class="card">
+          <h2>B站工具快捷入口</h2>
+          <div class="row">
+            <label>搜索视频</label>
+            <input id="tool-search-q" placeholder="如：AI 插件">
+            <button class="btn ghost" onclick="runTool('search')">搜索</button>
+          </div>
+          <div class="row">
+            <label>视频详情</label>
+            <input id="tool-video-bvid" placeholder="BV1xx411c7mu">
+            <button class="btn ghost" onclick="runTool('video')">查询</button>
+          </div>
+          <div class="row">
+            <label>UP主信息</label>
+            <input id="tool-whois-mid" placeholder="1515175012">
+            <button class="btn ghost" onclick="runTool('whois')">查询</button>
+          </div>
+          <div class="row">
+            <label>刷新 Feed</label>
+            <button class="btn ghost" onclick="runTool('feed')">获取推荐</button>
+          </div>
+          <div id="tool-result">工具输出会显示在这里...</div>
+        </div>
+      </div>
+
+    </main>
+  </div>
 </div>
 
-<div class="pane active" id="pane-overview">
-  <div class="card">
-    <h2><span class="iconfont icon-checkbox" style="vertical-align:-2px;margin-right:4px"></span>今日养号进度 <span id="daily-date" style="font-size:12px;color:#888;margin-left:8px"></span></h2>
-    <div id="daily-report" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px;margin-top:14px">
-      <div class="mini-stat" data-role="archives">
-        <div class="mini-icon"><span class="iconfont icon-bookmark-check" style=""></span></div>
-        <div class="mini-num" data-target="0">0</div>
-        <div class="mini-label">三连（喜欢+收藏+分享）</div>
-        <div class="mini-bar"><div></div></div>
-      </div>
-      <div class="mini-stat" data-role="danmus">
-        <div class="mini-icon"><span class="iconfont icon-message" style=""></span></div>
-        <div class="mini-num" data-target="0">0</div>
-        <div class="mini-label">弹幕</div>
-        <div class="mini-bar"><div></div></div>
-      </div>
-      <div class="mini-stat" data-role="comments">
-        <div class="mini-icon"><span class="iconfont icon-edit-pen" style=""></span></div>
-        <div class="mini-num" data-target="0">0</div>
-        <div class="mini-label">评论</div>
-        <div class="mini-bar"><div></div></div>
-      </div>
-      <div class="mini-stat" data-role="interactions">
-        <div class="mini-icon"><span class="iconfont icon-checkbox" style="font-size:20px"></span></div>
-        <div class="mini-num" data-target="0">0</div>
-        <div class="mini-label">今日互动总计</div>
-        <div class="mini-bar total"><div></div></div>
-      </div>
-    </div>
-    <div style="margin-top:14px;padding:10px 12px;background:#f6f8fa;border-radius:8px;font-size:13px;color:#555" id="daily-plan">
-      <span id="plan-text">加载中...</span>
-    </div>
-    <div id="daily-actions" style="margin-top:10px;max-height:280px;overflow-y:auto;padding:8px 12px;background:#fafbfc;border:1px solid #eee;border-radius:8px"></div>
-  </div>
-  <div class="card">
-    <h2><span class="iconfont icon-plus-follow" style="vertical-align:-2px;margin-right:4px"></span> 小号生态 <span id="bili-uname" style="font-size:12px;color:#888;margin-left:8px"></span></h2>
-    <div id="bili-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:14px">
-      <div class="mini-stat bili-green" data-role="following">
-        <div class="mini-icon"><span class="iconfont icon-plus-follow" style=""></span></div>
-        <div class="mini-num" data-target="0">0</div>
-        <div class="mini-label">关注（带的人）</div>
-      </div>
-      <div class="mini-stat bili-pink" data-role="follower">
-        <div class="mini-icon"><span class="iconfont icon-plus-follow" style="font-size:20px"></span></div>
-        <div class="mini-num" data-target="0">0</div>
-        <div class="mini-label">粉丝（带小号的人）</div>
-      </div>
-      <div class="mini-stat bili-yellow" data-role="likes">
-        <div class="mini-icon"><span class="iconfont icon-heart" style="font-size:20px;color:#ff6b6b"></span></div>
-        <div class="mini-num" data-target="0">0</div>
-        <div class="mini-label">累计被点赞</div>
-      </div>
-      <div class="mini-stat bili-blue" data-role="at">
-        <div class="mini-icon"><span class="iconfont icon-bell" style="font-size:18px"></span></div>
-        <div class="mini-num" data-target="0">0</div>
-        <div class="mini-label">未读 @ 你</div>
-      </div>
-      <div class="mini-stat bili-purple" data-role="reply">
-        <div class="mini-icon"><span class="iconfont icon-qa" style=""></span></div>
-        <div class="mini-num" data-target="0">0</div>
-        <div class="mini-label">未读 回复</div>
-      </div>
-      <div class="mini-stat bili-cyan" data-role="likeReply">
-        <div class="mini-icon"><span class="iconfont icon-thumb-up" style="font-size:18px"></span></div>
-        <div class="mini-num" data-target="0">0</div>
-        <div class="mini-label">回复被点赞</div>
-      </div>
-    </div>
-  </div>
-  <div class="card">
-    <h2>系统状态</h2>
-    <div class="grid">
-      <div class="stat clickable" id="stat-tokens" onclick="showTokenChart()" title="点击查看消耗趋势">
-        <div class="label">今日 Token / 预算 <span class="hint-link"><span class="iconfont icon-ranking" style="vertical-align:-2px"></span></span></div>
-        <div class="value" id="stat-tokens-value">-- / --</div>
-        <div class="bar" id="stat-tokens-bar"><div style="width:0%"></div></div>
-      </div>
-      <div class="stat" id="stat-doubao">
-        <div class="label">豆包 API</div>
-        <div class="value" id="stat-doubao-value">加载中...</div>
-      </div>
-      <div class="stat" id="stat-bili-api">
-        <div class="label">B站接口</div>
-        <div class="value" id="stat-bili-api-value">加载中...</div>
-      </div>
-      <div class="stat" id="stat-user">
-        <div class="label">主人</div>
-        <div class="value" id="stat-user-value">加载中...</div>
-      </div>
-    </div>
-  </div>
-  <div class="card" id="latest-diary-card" style="display:none">
-    <h2 id="latest-diary-title">最新日记</h2>
-    <div id="latest-diary-body"></div>
-  </div>
-  <div class="card">
-    <h2><span class="iconfont icon-deepseek" style="vertical-align:-4px;font-size:18px"></span> 主人的艾特 <span id="at-me-badge" class="tag offline">加载中</span></h2>
-    <p class="mini">好钢用在刀刃上——只回复主人的艾特，其他人的一律不回。点击"一键回复"让豆包生成合适的评论并自动发出。</p>
-    <div class="row" style="margin-top:8px">
-      <button class="btn ghost" onclick="loadAtMe()"><span class="iconfont icon-refresh" style="vertical-align:-2px"></span> 刷新艾特</button>
-    </div>
-    <div id="at-me-list" style="margin-top:12px">正在拉取主人的 @ 列表...</div>
-  </div>
-</div>
-
-<div class="pane" id="pane-run">
-  <div class="card">
-    <h2>一键唤醒分身</h2>
-    <p class="mini">点击按钮后，分身将自动执行「醒来 → 选题 → 深读 → 评论 → 写日记」全流程。下方会实时输出运行日志。</p>
-    <div class="row" style="margin-top:12px">
-      <button class="btn" id="btn-run">现在就唤醒</button>
-      <span id="run-status" class="tag offline">待运行</span>
-    </div>
-    <div id="run-log">点击上方按钮开始运行...</div>
-  </div>
-</div>
-
-<div class="pane" id="pane-diary">
-  <div class="card">
-    <h2>分身日记（跨天记忆）</h2>
-    <div id="diary-list">加载中...</div>
-  </div>
-</div>
-
-<div class="pane" id="pane-tasks">
-  <div class="card">
-    <h2>定时抢番任务</h2>
-    <p class="mini" style="margin-bottom:16px;">调度器每 60 秒扫一次任务表，到点自动触发。进程在 Web 服务启动时常驻运行。</p>
-    <div id="task-list">加载中...</div>
-  </div>
-
-  <div class="card">
-    <h2>新增任务</h2>
-    <div class="row">
-      <label>任务名称</label>
-      <input id="tk-name" placeholder="例如：凡人修仙传" style="flex:1">
-    </div>
-    <div class="row">
-      <label>视频链接</label>
-      <input id="tk-target-url" placeholder="番剧主页 ss 链接 / 单集 BV 链接（填 ss 自动解析最新正片）" style="flex:1">
-    </div>
-    <div class="row">
-      <label>更新日</label>
-      <select id="tk-day" style="flex:1">
-        <option value="0">周日</option><option value="1">周一</option><option value="2">周二</option>
-        <option value="3">周三</option><option value="4">周四</option><option value="5">周五</option>
-        <option value="6" selected>周六</option>
-      </select>
-    </div>
-    <div class="row">
-      <label>上线时间</label>
-      <input id="tk-time" type="time" value="11:00" style="flex:1">
-    </div>
-    <div class="row">
-      <label>提前量</label>
-      <input id="tk-lead" type="number" value="20" min="0" max="120" style="flex:1">
-      <span class="mini">分钟</span>
-    </div>
-    <div class="row">
-      <label>关联视频</label>
-      <input id="tk-owner-ref" placeholder="可选：引流用的 BV 号" style="flex:1">
-    </div>
-    <div class="row" style="align-items:flex-start">
-      <label>预设文案</label>
-      <textarea id="tk-template" rows="3" style="flex:1" placeholder="留空让 AI 自由发挥，例如：前排占位，等 UP 主翻牌~"></textarea>
-    </div>
-    <div class="row">
-      <label>备注</label>
-      <input id="tk-desc" placeholder="可选，给 AI 的额外指令" style="flex:1">
-    </div>
-    <div style="margin-top:16px">
-      <button class="btn primary" id="tk-save-btn" onclick="saveTask()">保存任务</button>
-    </div>
-  </div>
-</div>
-
-<div class="pane" id="pane-config">
-  <div class="card">
-    <h2>人设与偏好</h2>
-    <div class="row">
-      <label>分身昵称</label>
-      <input id="cf-name" value="">
-    </div>
-    <div class="row">
-      <label>性格标签</label>
-      <input id="cf-tags" value="" placeholder="如：爱刷AI视频, 喜欢猫咪, 话不多">
-    </div>
-    <div class="row">
-      <label>喜欢的内容</label>
-      <input id="cf-like" value="">
-    </div>
-    <div class="row">
-      <label>不喜欢的内容</label>
-      <input id="cf-dislike" value="">
-    </div>
-    <button class="btn" id="btn-save-persona">保存人设</button>
-  </div>
-
-  <div class="card">
-    <h2>Token 预算</h2>
-    <div class="row">
-      <label>每日预算</label>
-      <input id="cf-budget" type="number" value="">
-    </div>
-    <button class="btn" id="btn-save-budget">保存预算</button>
-  </div>
-
-  <div class="card">
-    <h2><span class="iconfont icon-edit-pen" style="vertical-align:-2px"></span> 活动日记 <span id="diary-auto-tag" class="tag">加载中</span></h2>
-    <p class="mini">自动日记已关闭。点击下方按钮，基于今天的工具调用记录（看过哪些视频、评论、关注变化等），让豆包生成一篇总结性日记写入日志。</p>
-    <div class="row">
-      <label>自动日记</label>
-      <label class="switch"><input type="checkbox" id="diary-auto-cb"><span></span></label>
-      <span class="mini">关闭后分身不会被强制写日记，节省 token</span>
-    </div>
-    <div class="row">
-      <button class="btn" id="btn-gen-diary"><span class="iconfont icon-diary" style="vertical-align:-2px;margin-right:4px"></span> 生成今日日记总结</button>
-    </div>
-    <div id="diary-gen-result" class="mini" style="display:none;margin-top:8px"></div>
-  </div>
-
-  <div class="card">
-    <h2>用户信息</h2>
-    <div class="row">
-      <label>B 站昵称</label>
-      <input id="cf-owner-name" value="">
-    </div>
-    <div class="row">
-      <label>B 站 UID</label>
-      <input id="cf-owner-mid" value="">
-    </div>
-    <button class="btn" id="btn-save-owner">保存用户信息</button>
-  </div>
-
-  <div class="card">
-    <h2><span class="iconfont icon-play" style="vertical-align:-2px"></span> 关注列表抢前排 <span id="fw-status" class="tag offline">加载中</span></h2>
-    <p class="mini">后台 0 token 守望关注的 UP 主，一旦有新投稿立刻用预设文案抢前排。Web 服务启动时自动拉起。</p>
-    <div class="row">
-      <label>启用守望</label>
-      <label class="switch"><input type="checkbox" id="fw-enabled"><span></span></label>
-    </div>
-    <div class="row">
-      <label>扫一眼频率</label>
-      <input id="fw-interval" type="number" min="180" step="30" value="">
-      <span class="mini">秒（最少 180 秒，防 B 站限频）</span>
-    </div>
-    <div class="row">
-      <label>仅白名单</label>
-      <label class="switch"><input type="checkbox" id="fw-ol"><span></span></label>
-      <span class="mini">只响应下面白名单的 UP 主 MID（关闭则响应所有关注）</span>
-    </div>
-    <div class="row">
-      <label>养号模式</label>
-      <label class="switch"><input type="checkbox" id="fw-nc"><span></span></label>
-      <span class="mini">三连+弹幕照常，只关掉评论。新号先养一周再开评论</span>
-    </div>
-    <div class="row">
-      <label>白名单 MID</label>
-      <input id="fw-wl" value="" placeholder="如 123456, 789012">
-    </div>
-    <div class="row">
-      <label>黑名单 MID</label>
-      <input id="fw-bl" value="" placeholder="永远不响应的 UP 主 MID">
-    </div>
-    <div class="row" style="align-items:flex-start">
-      <label>评论模板</label>
-      <textarea id="fw-templates" rows="4" placeholder="每行一条，随机选一条发"></textarea>
-    </div>
-    <div class="row">
-      <button class="btn" id="btn-save-fw">保存并重启守望</button>
-      <button class="btn ghost" onclick="testFollowFetch()">测试拉一次关注列表</button>
-    </div>
-  </div>
-</div>
-
-<div class="pane" id="pane-creds">
-  <div class="card">
-    <h2>豆包 API</h2>
-    <p class="mini">在 <a href="https://console.volcengine.com/ark" target="_blank">火山方舟控制台</a> 创建 API Key 和接入点。</p>
-    <div class="row">
-      <label>API Key</label>
-      <input id="cred-doubao-key" type="password" placeholder="sk-... （粘贴后自动隐藏）">
-    </div>
-    <div class="row">
-      <label>Endpoint ID</label>
-      <input id="cred-endpoint" value="" placeholder="ep-2025xxxxxx-xxxxx">
-    </div>
-    <button class="btn" id="btn-save-doubao">保存豆包凭据</button>
-  </div>
-
-  <div class="card">
-    <h2>B站小号 Cookie</h2>
-    <p class="mini">浏览器登录小号 → F12 → Application → Cookies → bilibili.com → 复制整行 Cookie 粘贴进来。</p>
-    <textarea id="cred-bili-cookie" placeholder="buvid3=...; SESSDATA=...; bili_jct=..."></textarea>
-    <div class="row" style="margin-top:10px">
-      <button class="btn" id="btn-save-bili">保存 B站 Cookie</button>
-      <span id="bili-status" class="tag offline">未配置</span>
-    </div>
-  </div>
-</div>
-
-<div class="pane" id="pane-tools">
-  <div class="card">
-    <h2>B站工具快捷入口</h2>
-    <div class="row">
-      <label>搜索视频</label>
-      <input id="tool-search-q" placeholder="如：AI 插件">
-      <button class="btn ghost" onclick="runTool('search')">搜索</button>
-    </div>
-    <div class="row">
-      <label>视频详情</label>
-      <input id="tool-video-bvid" placeholder="BV1xx411c7mu">
-      <button class="btn ghost" onclick="runTool('video')">查询</button>
-    </div>
-    <div class="row">
-      <label>UP主信息</label>
-      <input id="tool-whois-mid" placeholder="1515175012">
-      <button class="btn ghost" onclick="runTool('whois')">查询</button>
-    </div>
-    <div class="row">
-      <label>刷新 Feed</label>
-      <button class="btn ghost" onclick="runTool('feed')">获取推荐</button>
-    </div>
-    <div id="tool-result" style="background:#0a0b0e;border:1px solid #252830;border-radius:12px;padding:16px;margin-top:16px;font-family:monospace;font-size:15px;white-space:pre-wrap;max-height:400px;overflow-y:auto">工具输出会显示在这里...</div>
-  </div>
-</div>
-
-</main>
 <div id="token-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeTokenChart()">
   <div class="modal-box">
     <h3>Token 消耗趋势 <button class="close-btn" onclick="closeTokenChart()">×</button></h3>
     <div id="token-chart-content">加载中...</div>
   </div>
 </div>
+<script>
+// 顶栏日期 + 快捷入口（切 Tab 后可追加动作）
+(function(){
+  var d=new Date();
+  var el=document.getElementById('tb-date');
+  if(el)el.textContent=(d.getMonth()+1)+'月'+d.getDate()+'日 星期'+'日一二三四五六'[d.getDay()];
+  document.querySelectorAll('[data-goto]').forEach(function(n){
+    n.onclick=function(){
+      var t=document.querySelector('.tab[data-tab="'+n.dataset.goto+'"]');
+      if(t)t.click();
+      if(n.dataset.then)setTimeout(function(){var b=document.getElementById(n.dataset.then);if(b)b.click()},300);
+      if(n.dataset.scroll)setTimeout(function(){var b=document.getElementById(n.dataset.scroll);if(b)b.scrollIntoView({behavior:'smooth',block:'center'})},120);
+    };
+  });
+})();
+</script>
+<img class="page-mascot" id="page-mascot" src="/doubao.png" alt="" style="display:none">
 <script src="app.js"></script>
 </body>
 </html>

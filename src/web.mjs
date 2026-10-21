@@ -264,6 +264,43 @@ function summarizeTools(tools) {
   return out
 }
 
+function bjTime(iso) {
+  try {
+    return new Date(iso).toLocaleTimeString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }).slice(0, 5)
+  } catch { return String(iso || '').slice(11, 16) }
+}
+
+// 北京时间 YYYY-MM-DD（tokens.json 用的是这个格式，不要用带斜杠的 bjDate）
+function bjDateISO(iso) {
+  try {
+    const d = new Date(iso)
+    const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d)
+    const get = (t) => p.find(x => x.type === t)?.value || ''
+    return `${get('year')}-${get('month')}-${get('day')}`
+  } catch { return new Date().toISOString().slice(0, 10) }
+}
+
+function statsHistory() {
+  return getJson('stats-history.json')
+}
+
+// 每次拉到账号数据就落一份当日快照，用于计算日增量（纯本地读写，零成本）
+function snapshotStats(s) {
+  try {
+    const hist = statsHistory()
+    hist[bjDateISO(new Date().toISOString())] = {
+      following: s.following ?? 0,
+      follower: s.follower ?? 0,
+      likes: s.likes ?? 0,
+      level: s.level ?? null,
+      at: new Date().toISOString(),
+    }
+    const days = Object.keys(hist).sort()
+    for (const d of days.slice(0, Math.max(0, days.length - 120))) delete hist[d]
+    setJson('stats-history.json', hist)
+  } catch {}
+}
+
 function buildDiaryPrompt(cfg, s) {
   const owner = cfg.bili?.ownerName || '主人'
   const lines = [
@@ -407,6 +444,16 @@ async function api(req, res, pathname) {
   if (pathname === '/app.js' && req.method === 'GET') {
     return sendStatic(res, 'public/app.js', 'application/javascript')
   }
+  // iconfont 图标
+  if (pathname === '/iconfont.css' && req.method === 'GET') return sendStatic(res, 'font/iconfont.css', 'text/css')
+  if (pathname === '/iconfont.woff2' && req.method === 'GET') return sendStatic(res, 'font/iconfont.woff2', 'font/woff2')
+  if (pathname === '/iconfont.woff' && req.method === 'GET') return sendStatic(res, 'font/iconfont.woff', 'font/woff')
+  if (pathname === '/iconfont.ttf' && req.method === 'GET') return sendStatic(res, 'font/iconfont.ttf', 'font/ttf')
+  if (pathname === '/doubao.svg' && req.method === 'GET') return sendStatic(res, 'font/doubao.svg', 'image/svg+xml')
+  if (pathname === '/doubao.png' && req.method === 'GET') return sendStatic(res, 'font/doubao.png', 'image/png')
+  // AI 立绘形象库
+  const mascotMatch = pathname.match(/^\/mascot\/([A-Za-z0-9_-]+\.png)$/)
+  if (mascotMatch && req.method === 'GET') return sendStatic(res, 'public/mascot/' + mascotMatch[1], 'image/png')
   if (pathname === '/config' && req.method === 'GET') {
     const cfg = getJson('config.json')
     const creds = getJson('credentials.json')
@@ -845,20 +892,110 @@ async function api(req, res, pathname) {
       actions: actions.slice(-80).reverse(),
     }))
   }
-  if (pathname === '/api/bili-stats' && req.method === 'GET') {
-    const cfg = getJson('credentials.json')
-    if (!cfg.biliCookieSet) return send(res, 200, JSON.stringify({ ok: false, error: 'Cookie 未配置' }))
-    const H = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Referer': 'https://www.bilibili.com/',
-      'Cookie': cfg.biliCookie || '',
+  if (pathname === '/api/export-log' && req.method === 'GET') {
+    const allLogs = readWhaleLog()
+    const today = bjDateISO(new Date().toISOString())
+    const todayLogs = allLogs.filter(e => bjDateISO(e.at) === today)
+    const counts = { archive: 0, like: 0, fav: 0, share: 0, danmu: 0 }
+    const commentList = [], failList = []
+    for (const e of todayLogs) {
+      if (e.kind === 'comment') {
+        commentList.push({ time: bjTime(e.at), bv: e.target || '', note: e.note || e.text || '', ok: e.success !== false })
+        continue
+      }
+      if (e.kind !== 'tool_call' && e.kind !== 'action') continue
+      const t = e.tool || ''
+      if (t in counts) counts[t]++
+      if (e.success === false) failList.push({ time: bjTime(e.at), tool: t, target: e.target || '', note: e.note || '' })
     }
-    let nav = null, atCount = 0, replyCount = 0, likeReplyCount = 0
+
+    const cfg = getJson('config.json')
+    const budget = cfg.budget?.dailyTokens || 50000
+    const tokens = getJson('tokens.json')
+    const tokenToday = (tokens.history || []).find(h => h.date === today)?.total || 0
+
+    const hist = statsHistory()
+    const histDays = Object.keys(hist).sort()
+    const prevDay = histDays.filter(d => d < today).pop()
+    const cur = hist[today] || null
+    const prev = prevDay ? hist[prevDay] : null
+    const delta = (k) => (cur && prev && Number.isFinite(cur[k]) && Number.isFinite(prev[k])) ? (cur[k] - prev[k]) : null
+    const fmtDelta = (k) => { const d = delta(k); return d === null ? '' : (d >= 0 ? `（较${prevDay} +${d}）` : `（较${prevDay} ${d}）`) }
+
+    const allDays = [...new Set(allLogs.map(e => bjDateISO(e.at)).filter(Boolean))].sort()
+    const dayNo = allDays.length ? Math.floor((new Date(today) - new Date(allDays[0])) / 86400000) : 0
+
+    const L = []
+    L.push(`# Day ${dayNo} 日志素材 · ${today}`)
+    L.push('')
+    L.push('## 一、账号数据')
+    if (cur) {
+      L.push(`- 关注：${cur.following}${fmtDelta('following')}`)
+      L.push(`- 粉丝：${cur.follower}${fmtDelta('follower')}`)
+      L.push(`- 累计获赞：${cur.likes}${fmtDelta('likes')}`)
+      L.push(`- 等级：Lv${cur.level ?? '-'}`)
+    } else {
+      L.push('- 暂无快照（打开一次「小号生态」面板即可采集）')
+    }
+    L.push('')
+    L.push('## 二、今日行为')
+    const actParts = []
+    if (counts.archive) actParts.push(`三连 ${counts.archive}`)
+    if (counts.like) actParts.push(`喜欢 ${counts.like}`)
+    if (counts.fav) actParts.push(`收藏 ${counts.fav}`)
+    if (counts.share) actParts.push(`转发 ${counts.share}`)
+    if (counts.danmu) actParts.push(`弹幕 ${counts.danmu}`)
+    L.push(`- ${actParts.join('｜') || '无主动互动'}`)
+    L.push(`- 评论 ${commentList.length} 条（成功 ${commentList.filter(c => c.ok).length}，失败 ${commentList.filter(c => !c.ok).length}）`)
+    L.push(`- 行为事件 ${todayLogs.length} 条`)
+    L.push('')
+    L.push('## 三、Token')
+    L.push(`- 今日消耗：${tokenToday} / 预算 ${budget}（${budget ? Math.round(tokenToday / budget * 100) : 0}%）`)
+    L.push('')
+    L.push('## 四、评论明细（最近 10 条）')
+    if (commentList.length) {
+      for (const c of commentList.slice(-10)) {
+        L.push(`- ${c.time} ${c.bv ? `https://www.bilibili.com/video/${c.bv}` : '-'}　${c.note}${c.ok ? '' : '（失败）'}`)
+      }
+    } else {
+      L.push('- 无')
+    }
+    L.push('')
+    L.push('## 五、异常与失败')
+    if (failList.length) {
+      for (const f of failList.slice(-10)) L.push(`- ${f.time} ${f.tool} ${f.target} ${f.note}`)
+    } else {
+      L.push('- 无')
+    }
+    L.push('')
+    L.push('## 六、待补充（人工）')
+    L.push('- 今天最大的意外：')
+    L.push('- 踩到的坑：')
+    L.push('- 明天要验证的：')
+
+    return send(res, 200, JSON.stringify({ ok: true, date: today, dayNo, text: L.join('\n') }))
+  }
+  if (pathname === '/api/bili-stats' && req.method === 'GET') {
+    const H = biliReqHeaders()
+    if (!H) return send(res, 200, JSON.stringify({ ok: false, error: 'Cookie 未配置' }))
+    let nav = null, stat = { following: 0, follower: 0 }, likes = 0, atCount = 0, replyCount = 0, likeReplyCount = 0
     try {
       const r = await fetch('https://api.bilibili.com/x/web-interface/nav', { headers: H })
       const j = await r.json()
       if (j?.code === 0) nav = j.data
     } catch {}
+    if (nav?.mid) {
+      try {
+        const r = await fetch(`https://api.bilibili.com/x/relation/stat?vmid=${nav.mid}`, { headers: H })
+        const j = await r.json()
+        if (j?.code === 0) stat = { following: j.data?.following ?? 0, follower: j.data?.follower ?? 0 }
+      } catch {}
+      try {
+        const r = await fetch(`https://api.bilibili.com/x/space/upstat?mid=${nav.mid}`, { headers: H })
+        const j = await r.json()
+        if (j?.code === 0) likes = j.data?.likes ?? 0
+      } catch {}
+    }
     try {
       const r = await fetch('https://api.bilibili.com/x/msgfeed/unread?build=0&mobi_app=web', { headers: H })
       const j = await r.json()
@@ -868,11 +1005,12 @@ async function api(req, res, pathname) {
         likeReplyCount = j.data?.liked_reply ?? 0
       }
     } catch {}
+    if (nav?.mid) snapshotStats({ following: stat.following, follower: stat.follower, likes, level: nav?.level_info?.current_level })
     return send(res, 200, JSON.stringify({
       ok: !!nav,
       mid: nav?.mid,
       uname: nav?.uname,
-      stat: nav?.stat || { following: 0, follower: 0, likes: 0 },
+      stat: { following: stat.following, follower: stat.follower, likes },
       vipStatus: nav?.vipStatus,
       levelInfo: nav?.level_info,
       unread: { at: atCount, reply: replyCount, likeReply: likeReplyCount },

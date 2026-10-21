@@ -1,231 +1,208 @@
-# HANDOFF.md —— AI 对话交接文档（豆包 B站分身）
+# HANDOFF.md —— 交接文档（豆包 B站分身）
 
-> 当开启新对话时，**先读本文件 + AGENTS.md + docs/project-state.md**。
-> 本文件聚焦于：**当前正在做什么、还有什么没搞定、踩过哪些坑**。
-
----
-
-## 🔴 当前悬而未决的问题（下一个 AI 直接接手）
-
-### 问题：Web UI "保存任务"按钮**无任何反馈**
-
-**现象**：用户在「定时任务」Tab 填写完整表单（任务名称、视频链接、更新日、上线时间都填了）→ 点「保存任务」按钮 → **没有 toast 提示、没有红色输入框高亮、任务列表没刷新、没有任何反应**。
-
-**已确认**：
-- ✅ 渲染后的 HTML 里按钮有 `onclick="saveTask()"` 绑定（正确）
-- ✅ 渲染后的 `<script>` block `node --check` 语法通过（exit code 0）
-- ✅ `saveTask()` 函数完整存在（6 项校验 + toast + fetch POST + try-catch 全部在）
-- ✅ `toast()` 函数完整存在（创建 div、设样式、appendChild 到 body、2.5s 自动消失）
-- ✅ 6 个校验 if 分支都有 `toast('xxx','error')` 调用
-
-**尚未排查**：
-1. 用户浏览器缓存了旧 HTML？→ 让用户 **Ctrl+Shift+R 强刷** 后重试
-2. toast 创建了 div 但被 CSS 遮住？→ 检查全局 CSS 有没有 `pointer-events:none` / `visibility:hidden` / z-index 覆盖问题
-3. fetch POST 请求有没有真的发出去？→ **打开浏览器 DevTools → Network tab → 点保存按钮 → 看有没有 POST /api/tasks 请求**
-4. POST 返回什么？→ 成功 `{"ok":true}` / 错误状态码 / 根本没发出去
-
-**下一步 AI 必须做的**：
-1. `node -e "import http..."` fetch 宝塔 `/` 页面 → 提取 saveTask → 手动模拟调用（或直接 curl POST 测试）
-2. 或者让用户开 DevTools Network tab 再试一次，看请求到底发没发、返回什么
+> 新对话开始先读：**本文件 → AGENTS.md → 运营建议书.md**
+> 本文件记录：现在能跑什么、数据在哪、接口有哪些、明天要做什么、踩过哪些坑。
 
 ---
 
-## ✅ 本次对话已完成的修复
+## 📌 一句话现状（2026-10-21 收工）
 
-### 1. 模板字符串吞反斜杠 → 前端 JS 正则全坏了
+Web 面板跑在 `http://127.0.0.1:7890`，小号（`主人的豆包助理` mid `1184594322`）已进入**养号期**：
+只做三连/弹幕/被动回复，主动抢楼层等到 **10-27** 再开。Token 已上闸门，只花在「回复主人 @」上。
 
-**文件**：`src/web.mjs` 行 1110、1114
-
-**根因**：web.mjs 用 ES6 模板字符串（反引号）拼 HTML，内嵌 `<script>` 块的前端 JS。模板字符串里 `\d` 和 `\/` 不是合法转义序列，渲染后反斜杠被 **直接吞掉**：
-
-| 源码写法 | 模板渲染后 | 浏览器实际解析 |
-|---------|----------|--------------|
-| `/^BV\d+/` | `/^BVd+/` ❌ | 字母 `d`，不是数字匹配 |
-| `/^(https?:)?\/\//` | `/^(https?:)?///` ❌ | 三个斜杠，语法错乱 |
-| `/^\d{1,2}:\d{2}$/` | `/^d{1,2}:d{2}$/` ❌ | 同上 |
-
-**修复**：正则里的反斜杠**再加一倍**：`\d` → `\\d`、`\/` → `\\/`
-
-```js
-// 修复前（模板里单反斜杠会被吞）
-if(!/^(https?:)?\/\//.test(...)&&!/^BV\d+/.test(...)&&!/^ss\d+/.test(...))
-
-// 修复后（双反斜杠 → 模板渲染变单反斜杠 → 浏览器 JS 正则正确）
-if(!/^(https?:)?\\/\\//.test(...)&&!/^BV\\d+/.test(...)&&!/^ss\\d+/.test(...))
-```
-
-**验证方式**（模板字符串内嵌正则后的标准检查流程）：
-```bash
-# 1. 启动 web.mjs，curl 拉回渲染后的 HTML
-# 2. 提取 <script> 块，node --check 语法验证
-# 3. hex 字节码确认反斜杠存在：
-#    渲染后正则应该是 5c 64 = '\d'（一个反斜杠 + d）
-#    源码里应该是    5c 5c 64 = '\\d'（两个反斜杠 + d）
-```
-
-### 2. GET /api/tasks 空值崩溃
-
-**文件**：`src/web.mjs` 行 ~260
-
-**根因**：任务列表里某些任务的 `time` 字段缺失，`t.time.split(':')` 直接抛 `Cannot read properties of undefined`，返回 HTTP 500。前端 fetch 静默失败 → 任务列表空白 → 用户以为"什么都没有"。
-
-**修复**：加默认值 `t.time || '11:00'`，拆分前先判空。
-
-### 3. saveTask 表单校验 + 提示（代码已写好，但用户说没效果）
-
-**文件**：`src/web.mjs` 行 ~1085
-
-**已写**：
-- 6 项校验：任务名称、视频链接、链接格式（https/BV/ss）、更新日、上线时间格式、提前量
-- 每项校验失败：对应输入框 `borderColor='#ff6b6b'` + `toast('提示文字','error')` + focus + return
-- fetch try-catch：网络错误 toast、服务器错误 toast
-- 成功 toast + 按钮 loading 状态
-- 新增全局 `toast()` 函数（固定定位、右上角、2.5s 自动消失）
-
-**状态**：代码写好了，渲染出来也是完整的，但**用户说没效果**（见上方待解决问题）。
-
-### 4. 调试代码清理
-
-- ✅ `scheduler.mjs` 里所有 scheduler-debug.log 写入代码已移除
-- ✅ `web.mjs` POST /api/tasks handler 里所有 api-debug.log 写入代码已移除
-- ✅ E 盘根目录 `_*.mjs`、`_*.js`、`_*.txt` 临时调试文件已全部清理
-- ✅ D 盘（生产目录）遗留的 `_check.mjs`、`_debug.mjs`、`_live.html` 等还在，建议也清理
+| 指标 | 当前值 |
+|------|--------|
+| 关注 / 粉丝 / 被赞 | 304 / 13 / 12 |
+| 等级 | Lv2 |
+| 今日 Token | 83,101 / 50,000（早上分身暴走烧的，已修） |
+| 被动回复 | 今日 20 条，全成功，零风控 |
+| 主动评论 | **关闭中**（`follow-config.json` 的 `enabled=false`） |
 
 ---
 
-## 🏗️ 项目核心信息
+## 🚀 上手三步
 
-### 双目录架构（AGENTS.md §1 有完整说明）
-
-| 路径 | 角色 |
-|------|------|
-| `E:\doubao\` | **开发目录 + Git 仓库**（IDE 在这里打开） |
-| `D:\wwwroot\doubao-bot\` | **宝塔生产目录**（实际运行的代码） |
-
-同步命令：
 ```powershell
-robocopy "E:\doubao\src" "D:\wwwroot\doubao-bot\src" /MIR /NFL /NDL /NJH /NJS /NC /NS /NP
-robocopy "E:\doubao\tools" "D:\wwwroot\doubao-bot\tools" /MIR /NFL /NDL /NJH /NJS /NC /NS /NP
-```
-robocopy exit code 0-7 都是成功，PowerShell 报错忽略。
+# 1. 看进程（正常应该有两个：web.mjs + follow-await.mjs）
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Select ProcessId, CommandLine
 
-### 运行时数据位置
+# 2. 重启 Web（改完代码必须重启，ESM 有编译缓存）
+$p=(Get-NetTCPConnection -LocalPort 7890 -State Listen).OwningProcess; Stop-Process -Id $p -Force
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" | ? {$_.CommandLine -like '*follow-await*'} | % {Stop-Process -Id $_.ProcessId -Force}
+Start-Process node -ArgumentList 'src/web.mjs' -WorkingDirectory 'D:\wwwroot\doubao-bot' -WindowStyle Hidden
+
+# 3. 冒烟测试
+(Invoke-WebRequest 'http://127.0.0.1:7890/api/export-log' -UseBasicParsing).Content
+```
+
+> ⚠️ 重启时必须**连 follow-await 子进程一起杀**，否则会开出第二个养号进程（重复三连）。
+
+---
+
+## 🗂 目录结构
+
+```
+D:\wwwroot\doubao-bot\        ← 生产目录（宝塔实际运行这份）
+├── src/
+│   ├── web.mjs               ① HTTP 服务 + 全部 API + 启动 scheduler/follow-await
+│   ├── scheduler.mjs         定时任务调度（60s 扫一次）
+│   ├── follow-await.mjs      关注列表守望 + 养号三连（--no-comment 模式）
+│   ├── agent.mjs             豆包 AI 分身主循环
+│   ├── run-task.mjs          AI 模式任务（耗 token）
+│   ├── run-task-direct.mjs   纯脚本直达（0 token）
+│   ├── config.mjs / memory.mjs / doubao-client.mjs / tool-*.mjs
+├── tools/
+│   ├── bili.mjs              B站命令统一入口
+│   ├── lib/                  ★ 共用业务库（新代码优先往这里抽）
+│   │   ├── at-reply.mjs      「主人艾特」回复：豆包生成 + 防重复 + 已处理记录
+│   │   ├── quota-gate.mjs    token 预算闸门
+│   │   ├── msgfeed.mjs       收件箱
+│   │   ├── config.mjs        ~/.dsh 配置
+│   │   └── ffmpeg.mjs
+│   └── commands/             40 个命令（feed / comment / danmu / follow-sync ...）
+├── public/                   ★ 前端三件套（改界面只动这里）
+│   ├── index.html            页面骨架 + Tab
+│   ├── app.js                所有交互逻辑（原生 JS，无框架）
+│   └── styles.css            样式（含明暗主题）
+├── font/iconfont.{css,woff2,woff,ttf}   ★ 图标字体（由 iconfont.cn 导出）
+├── docs/project-state.md     （旧版状态记录，可能过时）
+└── HANDOFF.md                本文件
+```
+
+前端 **零框架零构建**：改完 `public/*` 只需强刷（Ctrl+Shift+R），不用重启。
+后端 **改完 `src/*` 必须重启**。
+
+---
+
+## 💾 数据文件在哪（都不在项目目录里）
 
 ```
 C:\Users\Administrator\.doubao-bot\
-├── tasks.json          # 定时任务列表
-├── scheduler-state.json # 调度器内部状态
-├── credentials.json    # 🔒 Cookie + API Key（敏感！）
-├── config.json
-├── quota.json          # token 用量统计
-├── diary.md            # AI 写的日记
-└── logs/               # 运行日志
+├── credentials.json      🔒 Cookie + 豆包 API Key（绝不能进 Git）
+├── config.json           人设、预算、ownerName/ownerMid
+├── follow-config.json    守望开关、白名单、评论模板
+├── tokens.json           token 用量 history[{date,total}]（date 格式 YYYY-MM-DD）
+├── tool-log.jsonl        工具调用流水（旧）
+├── agent-state.json      分身状态
+├── at-processed.json     「主人艾特」已回复记录（Web 手动 + 定时脚本共用）
+├── reply-state.json      被动回复已处理记录
+├── stats-history.json    ★ 新增：每日账号快照 {YYYY-MM-DD:{following,follower,likes,level}}
+└── logs/
+
+C:\Users\Administrator\.dsh\
+└── whale-log.jsonl       ★ 分身行为总账（日记、养号统计、日志素材都读它）
+                           字段：{at, kind, tool, target, note, success}
+                           kind: tool_call / action / comment / summary / thought
 ```
 
-### 关键文件速查
-
-| 文件 | 作用 | 关键函数/位置 |
-|------|------|-------------|
-| `src/web.mjs` | Web 管理界面（HTTP server, port 7890） | `resolveDataDir()` 行11+58；模板字符串 HTML 渲染；saveTask ~行1085 |
-| `src/scheduler.mjs` | 定时任务调度器 | `setTasks()` 行39；两个独立的 `resolveDataDir()`（和 web.mjs 重复） |
-| `src/agent.mjs` | 豆包 AI 分身主循环 | Function Call 循环 |
-| `src/run-task-direct.mjs` | 纯脚本直达（0 token，抢前排） | |
-| `src/run-task.mjs` | AI 驱动任务（耗 token） | |
-| `src/follow-await.mjs` | 关注列表守望进程 | 轮询 B 站动态 API |
-| `tools/commands/bangumi.mjs` | 番剧 ss→最新正片 BV 解析 | `SKIP_TOKENS` 过滤预告/花絮等 |
-
-### 宝塔 Node 守护进程
-
-```
-进程名：node.exe
-命令行：node src/web.mjs
-父进程：pwsh.exe（宝塔面板拉起的 PowerShell）
-监听端口：7890
-代理配置：D:\BtSoft\panel\data\proxy\豆包B站助手.conf
-  → toUrl: http://127.0.0.1:7890
-```
-
-**宝塔编译缓存陷阱**：
-- kill node.exe 后宝塔自动重启，新进程可能命中 Node.js ESM 编译缓存
-- 表现：磁盘文件内容 A，进程运行的却是旧版本 B
-- **现象**：setTasks() 写磁盘成功了，但紧接着被旧版本的空数组覆盖
-- 解决方式：在宝塔面板 UI 上手动点「重启」按钮（不是 taskkill 后等它自动拉）
+**所有这些目录都在 .gitignore 里，别 commit。**
 
 ---
 
-## 🚨 踩过的坑（必读，避免浪费时间）
+## 🔌 主要接口（都在 web.mjs）
 
-### 坑 1：ES6 模板字符串吞反斜杠 → 正则/转义全坏
-
-**表现**：`node --check web.mjs` 通过，但浏览器里报正则语法错或正则不匹配。
-
-**根因**：模板字符串里 `\d`、`\w`、`\s`、`\/` 这些不是合法 JS 转义序列。ES6 规范规定：未识别的转义序列 → **反斜杠被静默丢弃**。
-
-**铁律**：模板字符串里写正则字面量，反斜杠**必须双写**。
-
-### 坑 2：PowerShell 吞逗号 → 误报源码语法错误
-
-**表现**：PowerShell 命令行打印源码片段，逗号全没了。AI 误以为源码丢逗号，瞎补一通反而引入 bug。
-
-**根因**：PowerShell 把 `,` 识别为数组分隔符，在参数传递阶段吞掉。
-
-**铁律**（AGENTS.md §4.6 已写）：
-1. 判源码语法 → 用 **内置 Read 工具** 读文件，不要用 PowerShell 截取
-2. 真要 shell 操作 → 用 CMD / Git Bash / WSL，**禁止 PowerShell**
-3. 终极验证 → `node --check xxx.mjs` + hex 字节码对比
-
-### 坑 3：IDE OOM 崩溃 → 终端进程没清理
-
-**表现**：Trae/Cursor 直接闪退，exit code -536870904 = "oom"。
-
-**根因**：反复 RunCommand 开后台 node 进程（web.mjs、测试脚本等），旧进程没 StopCommand，内存吃光。
-
-**铁律**（AGENTS.md §4.5 已写）：
-- 开后台长进程 → 任务完**必须 StopCommand**
-- 端口占用 EADDRINUSE → `taskkill /F /IM node.exe` 清干净
-
-### 坑 4：Node.js ESM 编译缓存
-
-**表现**：磁盘文件改了，进程行为没变。setTasks() 写 tasks.json 立刻被空数组覆盖。
-
-**根因**：kill 进程后宝塔自动拉起新 node，新进程命中 v8 编译缓存，加载的还是旧版 scheduler.mjs。
-
-**铁律**：改了 scheduler.mjs 后，**不要 kill 让宝塔自动重启**，而是**去宝塔面板 UI 手动点"重启"**。
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/` `/app.js` `/styles.css` `/iconfont.*` | GET | 静态资源（iconfont 路由必须指向 `font/`） |
+| `/api/dashboard` | GET | 首页卡片：token、日记、守望状态 |
+| `/api/daily-report` | GET | 今日养号统计（三连/弹幕/评论/交互总计） |
+| **`/api/export-log`** | GET | **★ 新增：生成「Day N 日志素材」纯文本，零 token** |
+| `/api/bili-stats` | GET | 小号真实数据（nav + relation/stat + upstat + msgfeed）✱ 会写 stats-history.json |
+| `/api/at-me` | GET | 主人艾特未处理列表 |
+| `/api/reply-at` | POST | 手动回复某条艾特（豆包生成） |
+| `/api/generate-diary` | POST | 一键让豆包写今日日记（**唯一主动花 token 的写操作**） |
+| `/api/tasks` | GET/POST | 定时抢番任务 |
+| `/config` `/follow-config` `/creds` | POST | 各类配置保存 |
+| `/diary` | GET | 跨天日记（分组、倒序） |
 
 ---
 
-## 📝 AGENTS.md 里已有的重要规则（不要重复踩）
+## 🆕 今天（10-21）新增的东西
 
-- §1 双目录架构 + robocopy 同步流程
-- §2 敏感信息（Cookie/API Key）绝对不能进 Git
-- §3.1 零依赖原则（全程原生 Node 模块）
-- §4.5 终端进程管理（开后台必须关）
-- §4.6 PowerShell 文本读取约束（禁止用 PowerShell 判源码语法）
+### 1. 日志素材导出（零 token）
+
+目的：**没预算做视频，改用文字专栏连载**。每天点一下就有一份数据齐全的草稿。
+
+- 后端：`/api/export-log`，从 `whale-log.jsonl` + `stats-history.json` + `tokens.json` 汇总
+- 前端：「日记」Tab 顶部 → **生成日志素材** 按钮（自动复制到剪贴板 + 文本框可改）
+- 输出内容：账号数据（含日增量）／今日行为／Token／最近 10 条评论／失败记录／人工补写提纲
+
+### 2. 每日账号快照
+
+`/api/bili-stats` 每次成功拉到数据就往 `stats-history.json` 写当天一条（保留 120 天）。
+**日增量**（粉丝 +N）靠它算，没有它导出里就不会有「较昨日」。
+
+### 3. 「主人艾特」回复统一到 `tools/lib/at-reply.mjs`
+
+Web 手动回复和 `scan-comment-for-tag.mjs` 定时回复**共用同一份实现和同一份已处理记录**，物理上不会重复回复。
 
 ---
 
-## 🎯 下一步建议
+## 🔜 明天要做的（用户点名）
 
-1. **第一优先级**：排查 saveTask 无反馈问题（让用户 Ctrl+Shift+R 强刷 + 开 DevTools Network tab 看请求）
-2. **清理 D 盘**：`D:\wwwroot\doubao-bot\` 下的 `_check.mjs`、`_debug.mjs`、`api-debug.log`、`_live.html` 等临时文件建议也清掉
-3. **AGENTS.md 更新**：把「模板字符串里正则要双写反斜杠」这条加进 §4 开发规范
-4. **scheduler.mjs 重复代码**：web.mjs 和 scheduler.mjs 各有一份 `resolveDataDir()`，逻辑完全一样，可以统一到 `src/config.mjs` 里 export 一份
+### UI 美化（最高优先级）
+
+用户原话：**「明天我们优化一下界面，现在的界面太丑了」**。已知问题：
+
+1. **卡片过多、无节奏**——概览页 5 个 Card 堆叠，没有主次
+2. **明暗主题不完整**——新增的 `#f6f8fa`、`#dcdfe6` 这类硬编码色值没跟着主题走，暗色下会很脏
+3. **数字字体**——已改 `30px/800/tabular-nums`，但仍需在真实数据下复查对齐
+4. **图标尺寸**——刚统一成 24px，复查是否有遗漏的内联 `font-size`
+5. **响应式**——窄屏下 mini-stat 网格会挤成两行
+
+**施工建议**：只动 `public/styles.css` + `public/index.html`，不要碰 `web.mjs` 里的路由和 API。
+改完强刷即可验证，不需要重启服务。
+
+### 其他待办
+
+- [ ] 关注同步降速重跑：`node tools/commands/follow-sync.mjs --go --daily 10`（还有 111 个待关注，昨天被 22015 拦）
+- [ ] 10-27 养号期满 → `follow-config.json` 开 `enabled=true`（白名单里已配好鲸鱼娘 mid `3747573030456892`）
+- [ ] 鲸鱼娘（DeepSeek）和龙娘（ChatGPT, `BV1pinc6FEjR` 那条视频的 UP）都可以进白名单观察池
+- [ ] 根目录有个神秘文件叫 `{`（shell 写坏的残留），可以删
 
 ---
 
-## 📞 快速启动命令
+## 🚨 踩过的坑（别再踩）
 
-```powershell
-# 开发测试（E盘，端口 7890）
-cd E:\doubao ; node src/web.mjs
+### 坑 1：ES6 模板字符串吞反斜杠
+`web.mjs` 里用模板字符串拼 HTML 时，`\d` `\/` 会被静默丢弃 → 前端正则全坏。
+**铁律**：模板字符串里的正则，反斜杠双写。
 
-# 同步到生产
-robocopy "E:\doubao\src" "D:\wwwroot\doubao-bot\src" /MIR /NFL /NDL /NJH /NJS /NC /NS /NP
+### 坑 2：B 站接口「静默失败」
+- `x/web-interface/nav` **不返回关注数/粉丝数**，必须单独调 `x/relation/stat` 和 `x/space/upstat`
+- 关注接口返回 `22015`（操作频繁）**不代表没成功**，实际可能成功一半，必须拉 `relation/stat` 核对
+- 关键数据永远交叉验证，别信返回码
 
-# 检查渲染后 JS 语法（排查模板字符串问题的标准流程）
-node -e "import http,fs from 'node:http';const r=http.request({hostname:'127.0.0.1',port:7890,path:'/'},res=>{let b='';res.on('data',d=>b+=d);res.on('end',()=>{const s=[...b.matchAll(/<script>([\s\S]*?)<\/script>/g)];s.forEach((m,i)=>fs.writeFileSync('E:/doubao/_chk_'+i+'.js',m[1]))})});r.end()"
-node --check E:\doubao\_chk_1.js
+### 坑 3：iconfont.cn 导出的 class 名是拼音
+导出默认 `icon-baitianmoshi`，而 HTML 里写 `icon-sun` → 图标全空白（路由 200、字体 200 也没用）。
+**铁律**：接入第三方图标，先写一个 `<span class="iconfont icon-xxx">` 手动验证 class 名，再怀疑链路。
+已用脚本把 59 个 class 批量改为英文，重新导出字体后要再跑一次。
 
-# curl POST 测试接口
-node -e "import http from 'node:http';const b=JSON.stringify({action:'add',task:{id:'test-1',name:'测试',targetUrl:'https://b23.tv',day:[6],time:'21:00'}});const r=http.request({hostname:'127.0.0.1',port:7890,path:'/api/tasks',method:'POST',headers:{'Content-Type':'application/json','Content-Length':b.length}},x=>{let d='';x.on('data',c=>d+=c);x.on('end',()=>console.log(x.statusCode,d))});r.write(b);r.end()"
-```
+### 坑 4：PowerShell 吞逗号
+用 PowerShell 截取源码做语法判断 → 逗号消失 → 误判源码坏了，乱补反而真坏。
+**铁律**：判断源码内容一律用 Read 工具；写文件用 Write 工具，**禁止 here-string / node -e 拼 JS**。
+
+### 坑 5：AI 自主行为没有预算闸门
+分身每次「醒来」都调一次豆包写日记，一个早上 13 次 → 8 万 token。
+**铁律**：任何自主触发的模型调用，必须先过 `quota-gate`，写死检查，不能靠自觉。
+
+### 坑 6：ESM 编译缓存
+改完 `src/*.mjs` 只 kill 不重启，或宝塔自动拉起，可能加载旧版本。
+**铁律**：改后端 → 显式 kill 全部 node → 重新 `Start-Process`（或宝塔 UI 点重启）。
+
+### 坑 7：终端进程泄漏 → IDE OOM
+开后台 node 不关，几个就吃光内存。
+**铁律**：临时起的进程任务结束就停；重启前先看 `Get-CimInstance Win32_Process`。
+
+---
+
+## 📅 运营节奏（当前在「养号期」）
+
+| 日期 | 阶段 | 动作 |
+|------|------|------|
+| 10-19 ~ 10-21 | Day 0-2 | 起号、重构、被动回复打通 |
+| 10-22 ~ 10-26 | 养号 | 每天三连 3-5 个 + 只回主人 @ + 关注降速补 10 个/天 |
+| **10-27** | 开闸 | 开主动抢楼层，只盯白名单（鲸鱼娘），限额 3 条/天 |
+| 10-28 ~ | 观察 | 无异常再加量，不碰路人评论（token 只给主人） |
+
+详细策略见 [运营建议书.md](./运营建议书.md)。

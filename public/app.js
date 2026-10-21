@@ -4,6 +4,8 @@
     var p=m[s]||'19';
     localStorage.setItem('fs',p);
     document.documentElement.style.setProperty('--fs-base',p+'px');
+    // 页面大部分字号是固定 px，仅靠变量看不出变化；整体缩放才能生效
+    document.body.style.zoom=(parseInt(p,10)/19);
     document.querySelectorAll('#btn-fs-sm,#btn-fs-md,#btn-fs-lg').forEach(function(b){b.classList.remove('active')});
     var mp={sm:'btn-fs-sm',md:'btn-fs-md',lg:'btn-fs-lg'};
     var el=document.getElementById(mp[s]);
@@ -13,15 +15,87 @@
     localStorage.setItem('theme',t);
     document.documentElement.setAttribute('data-theme',t);
     var b=document.getElementById('btn-theme');
-    if(b)b.textContent=t==='light'?'<span class="iconfont icon-sun" style="font-size:14px"></span>':'<span class="iconfont icon-moon" style="font-size:14px"></span>';
+    if(b)b.innerHTML=t==='light'?'<span class="iconfont icon-sun" style="font-size:14px"></span>':'<span class="iconfont icon-moon" style="font-size:14px"></span>';
   }
   var c=localStorage.getItem('fs')||'19';
   if(c==='15')setFS('sm');else if(c==='24')setFS('lg');else setFS('md');
-  setTheme(localStorage.getItem('theme')||'dark');
+  setTheme(localStorage.getItem('theme')||'light');
   var s1=document.getElementById('btn-fs-sm');if(s1)s1.onclick=function(){setFS('sm')};
   var s2=document.getElementById('btn-fs-md');if(s2)s2.onclick=function(){setFS('md')};
   var s3=document.getElementById('btn-fs-lg');if(s3)s3.onclick=function(){setFS('lg')};
   var s4=document.getElementById('btn-theme');if(s4)s4.onclick=function(){var n=document.documentElement.getAttribute('data-theme')||'dark';setTheme(n==='dark'?'light':'dark')};
+
+  // ===== 形象设置 =====
+  var MASCOTS=[
+    {id:'doubao',name:'豆包'},{id:'deepseek',name:'DeepSeek'},{id:'gpt',name:'ChatGPT'},
+    {id:'kimi',name:'Kimi'},{id:'claud',name:'Claude'},{id:'gemini',name:'Gemini'},
+    {id:'qwen',name:'通义千问'},{id:'yuanbao',name:'元宝'},{id:'hunyuan',name:'混元'},
+    {id:'gork',name:'Grok'},{id:'minimax',name:'MiniMax'},{id:'mistral',name:'Mistral'},
+    {id:'wxyy',name:'文心一言'},{id:'xiaomi',name:'小米'},{id:'RWKV',name:'RWKV'}
+  ];
+  var MS_KEY='mascot-settings';
+  var ms={char:'doubao',pos:'sidebar',scale:100,opacity:100,offset:0,x:0};
+  try{var saved=JSON.parse(localStorage.getItem(MS_KEY)||'null');if(saved)ms=Object.assign(ms,saved)}catch(e){}
+  function msUrl(id){return '/mascot/'+id+'.png'}
+  function applyMascot(){
+    var sb=document.getElementById('sb-mascot');
+    var pg=document.getElementById('page-mascot');
+    var url=msUrl(ms.char);
+    var w=Math.round(250*ms.scale/100);
+    if(sb){
+      if(ms.pos==='sidebar'){sb.style.display='';sb.src=url;sb.style.width=w+'px';sb.style.opacity=ms.opacity/100;sb.style.bottom=(60+ms.offset)+'px';sb.style.marginLeft=ms.x+'px'}
+      else sb.style.display='none';
+    }
+    if(pg){
+      if(ms.pos==='float'){pg.style.display='';pg.src=url;pg.style.width=w+'px';pg.style.opacity=ms.opacity/100;pg.style.bottom=ms.offset+'px';pg.style.right=(24-ms.x)+'px'}
+      else pg.style.display='none';
+    }
+    document.querySelectorAll('.mp-char').forEach(function(c){c.classList.toggle('active',c.dataset.id===ms.char)});
+    document.querySelectorAll('#mp-pos button').forEach(function(b){b.classList.toggle('active',b.dataset.pos===ms.pos)});
+    localStorage.setItem(MS_KEY,JSON.stringify(ms));
+  }
+  var mpGrid=document.getElementById('mp-grid');
+  if(mpGrid){
+    MASCOTS.forEach(function(m){
+      var d=document.createElement('div');
+      d.className='mp-char';d.dataset.id=m.id;d.title=m.name;
+      d.innerHTML='<img src="'+msUrl(m.id)+'" alt="'+m.name+'" loading="lazy">';
+      d.onclick=function(){ms.char=m.id;applyMascot()};
+      mpGrid.appendChild(d);
+    });
+  }
+  document.querySelectorAll('#mp-pos button').forEach(function(b){
+    b.onclick=function(){ms.pos=b.dataset.pos;applyMascot()};
+  });
+  var mpScale=document.getElementById('mp-scale');
+  if(mpScale){mpScale.value=ms.scale;
+    document.getElementById('mp-scale-val').textContent=ms.scale+'%';
+    mpScale.oninput=function(){ms.scale=parseInt(mpScale.value,10);document.getElementById('mp-scale-val').textContent=ms.scale+'%';applyMascot()};
+  }
+  var mpOff=document.getElementById('mp-offset');
+  if(mpOff){mpOff.value=ms.offset;
+    document.getElementById('mp-offset-val').textContent=ms.offset+'px';
+    mpOff.oninput=function(){ms.offset=parseInt(mpOff.value,10);document.getElementById('mp-offset-val').textContent=ms.offset+'px';applyMascot()};
+  }
+  var mpX=document.getElementById('mp-x');
+  if(mpX){mpX.value=ms.x;
+    document.getElementById('mp-x-val').textContent=ms.x+'px';
+    mpX.oninput=function(){ms.x=parseInt(mpX.value,10);document.getElementById('mp-x-val').textContent=ms.x+'px';applyMascot()};
+  }
+  var mpOp=document.getElementById('mp-opacity');
+  if(mpOp){mpOp.value=ms.opacity;
+    document.getElementById('mp-opacity-val').textContent=ms.opacity+'%';
+    mpOp.oninput=function(){ms.opacity=parseInt(mpOp.value,10);document.getElementById('mp-opacity-val').textContent=ms.opacity+'%';applyMascot()};
+  }
+  var btnMs=document.getElementById('btn-mascot-set');
+  var msPanel=document.getElementById('mascot-panel');
+  if(btnMs&&msPanel){
+    btnMs.onclick=function(e){e.stopPropagation();msPanel.style.display=msPanel.style.display==='none'?'':'none'};
+    document.addEventListener('click',function(e){
+      if(msPanel.style.display!=='none'&&!msPanel.contains(e.target))msPanel.style.display='none';
+    });
+  }
+  applyMascot();
 })();
 
 document.querySelectorAll('.tab').forEach(function(t){t.onclick=function(){
@@ -226,6 +300,35 @@ if(btnGenDiary){
   };
 }
 
+var btnExportLog=document.getElementById('btn-export-log');
+if(btnExportLog){
+  btnExportLog.onclick=async function(){
+    var tip=document.getElementById('export-log-tip');
+    var box=document.getElementById('export-log-box');
+    btnExportLog.disabled=true;btnExportLog.textContent='生成中...';
+    try{
+      var r=await fetch('/api/export-log').then(function(r){return r.json()});
+      if(!r.ok)throw new Error(r.error||'导出失败');
+      box.style.display='block';
+      box.value=r.text;
+      box.scrollTop=0;
+      var copied=false;
+      try{await navigator.clipboard.writeText(r.text);copied=true;}catch(e){}
+      if(!copied){
+        try{box.focus();box.select();copied=document.execCommand('copy');}catch(e){}
+      }
+      if(!copied){box.focus();box.select();}
+      tip.textContent=copied?'已复制到剪贴板 · '+r.date:'已生成，请手动复制 · '+r.date;
+      toast('日志素材已生成'+(copied?'并复制':''));
+    }catch(e){
+      tip.textContent=e.message;
+      toast('导出失败：'+e.message,'error');
+    }finally{
+      btnExportLog.disabled=false;btnExportLog.textContent='生成日志素材';
+    }
+  };
+}
+
 var btnSaveFW=document.getElementById('btn-save-fw');if(btnSaveFW)btnSaveFW.onclick=async function(){
   var body={
     enabled:document.getElementById('fw-enabled').checked,
@@ -272,7 +375,7 @@ async function loadDiary(){
   if(!list)return;
   if(!Array.isArray(diary)||diary.length===0){list.innerHTML='<p class="mini">还没有日记，唤醒分身一次就会有了~</p>';return}
   list.innerHTML=diary.slice().reverse().map(function(d){
-    var evts=(d.events||[]).map(function(ev){
+    var evts=(d.events||[]).slice().reverse().map(function(ev){
       var cls='evt-'+(ev.kind||'event');
       var label=KIND_LABEL[ev.kind]||ev.kind||'事件';
       return '<div class="diary-event '+cls+'" style="cursor:pointer" onclick="this.classList.toggle(\'expanded\')">'+
