@@ -598,6 +598,10 @@ function _renderTrajectory(d){
   h+='  <div style="color:#38bdf8;font-size:13px">'+(cs.status==='running'?'🟢 在忙 · '+cs.activity:'⚪ 空闲中 · 上一次 '+cs.activity||'无记录')+'</div>';
   h+='  <div style="color:#888;font-size:11px;margin-top:3px">'+(cs.detail||'')+'</div>';
   h+='</div>';
+  h+='<div style="padding:8px 14px;background:'+(d.followRunning?'#0d2818':'#2a1010')+';border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center">';
+  h+='  <span style="font-size:12px;color:'+(d.followRunning?'#52c41a':'#ff7875')+'">'+(d.followRunning?'🟢 关注守望运行中':'🔴 关注守望已停止')+'</span>';
+  h+='  <span style="font-size:11px;color:#888">'+(d.whaleMtime?'日记文件最后更新: '+d.whaleMtime:'无日记文件')+'</span>';
+  h+='</div>';
   h+='<div style="padding:12px;font-size:12.5px;font-family:monospace;color:#d0d4dc;line-height:1.75">';
   if(d.runs&&d.runs.length){
     h+='<div style="font-weight:700;margin:6px 0 6px;color:#fff">📋 活动流水 ('+d.runs.length+')</div>';

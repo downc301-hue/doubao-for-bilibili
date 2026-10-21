@@ -796,7 +796,23 @@ async function api(req, res, pathname) {
     for (const r of runs) delete r._raw
     for (const t of tools) delete t._raw
 
-    return send(res, 200, JSON.stringify({ runs, tools, currentStatus }))
+    const fw = getFollowStatus()
+    let whaleFileMtime = null
+    try {
+      const p = findFile([
+        path.join(os.homedir(), '.dsh', 'whale-log.jsonl'),
+        'C:\\Users\\Administrator\\.dsh\\whale-log.jsonl',
+      ])
+      if (p) whaleFileMtime = bj(fs.statSync(p).mtime.toISOString())
+    } catch {}
+
+    return send(res, 200, JSON.stringify({
+      runs, tools, currentStatus,
+      followRunning: fw?.running === true,
+      followPid: fw?.pid || null,
+      followLastCheck: fw?.lastCheck ? bj(fw.lastCheck) : null,
+      whaleMtime: whaleFileMtime,
+    }))
   }
   if (pathname === '/api/daily-report' && req.method === 'GET') {
     const whaleLogs = readWhaleLog()
