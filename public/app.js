@@ -139,7 +139,7 @@ async function loadConfig(){
       var be=document.getElementById('cred-endpoint');if(be)be.value=creds.endpointId||'';
       var bs=document.getElementById('bili-status');if(bs){bs.textContent=creds.biliCookieSet?'Cookie 已配置':'未配置';bs.className='tag '+(creds.biliCookieSet?'online':'offline')}
     }
-    var fw=await fetch('/fw-config-all').then(function(r){return r.json()}).catch(function(){return {}});
+    var fw=await fetch('/api/fw-config').then(function(r){return r.json()}).catch(function(){return {}});
     var fwEl=document.getElementById('fw-enabled');if(fwEl)fwEl.checked=!!fw.enabled;
     fwEl=document.getElementById('fw-interval');if(fwEl)fwEl.value=fw.interval||300;
     fwEl=document.getElementById('fw-ol');if(fwEl)fwEl.checked=!!fw.onlyWhitelist;
