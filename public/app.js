@@ -605,8 +605,8 @@ function _renderTrajectory(d){
     h+='<div style="font-weight:700;margin:6px 0 6px;color:#fff">📋 活动流水 ('+d.runs.length+')</div>';
     d.runs.slice(-30).reverse().forEach(function(r){
       var t=_bjTime(r.time);
-      var ic=r.event==='start'?'🚀':r.event==='round'?'🔄':r.event==='tool'?'🛠️':r.event==='done'?'✅':r.event==='aborted'?'🛑':r.event==='api_error'?'❌':r.event==='forced'?'🛑':(r.event||'💭');
-      var col=r.event==='tool'?'#38bdf8':r.event==='api_error'?'#ff4d4f':r.event==='done'?'#52c41a':r.event==='thought'?'#c9d1d9':'#c9d1d9';
+      var ic=r.event==='start'?'🚀':r.event==='round'?'🔄':r.event==='tool'?'🛠️':r.event==='done'?'✅':r.event==='aborted'?'🛑':r.event==='api_error'?'❌':r.event==='forced'?'🛑':r.event==='wake'?'⏰':r.event==='thought'?'💭':r.event==='comment'?'💬':r.event==='feeling'?'😊':r.event==='summary'?'📝':'💭';
+      var col=r.event==='tool'?'#38bdf8':r.event==='api_error'?'#ff4d4f':r.event==='done'?'#52c41a':r.event==='comment'?'#95de64':r.event==='summary'?'#ffd666':r.event==='wake'?'#36cfc9':'#c9d1d9';
       var detail='';
       if(r.event==='thought'||r.event==='event'||r.event==='summary'){
         detail=r.content||r.note||r.summary||'';

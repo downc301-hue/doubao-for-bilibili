@@ -783,8 +783,8 @@ async function api(req, res, pathname) {
           resultSize: e.note ? String(e.note).length : 0,
           durationMs: e.durationMs || 0,
         })
-      } else if (e.kind === 'thought' || e.kind === 'event' || e.kind === 'summary') {
-        runs.push({ event: e.kind || 'thought', time: bj(e.at), _raw: e.at, content: String(e.event || e.note || e.summary || '').slice(0, 80) })
+      } else {
+        runs.push({ event: e.kind || 'event', time: bj(e.at), _raw: e.at, content: String(e.event || e.note || e.summary || '').slice(0, 80) })
       }
     }
     runs = runs.sort((a, b) => new Date(a._raw || a.time) - new Date(b._raw || b.time))
