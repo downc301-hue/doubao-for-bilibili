@@ -64,6 +64,25 @@ const QUIET = args.includes('--quiet')
 const ONLY_WHITELIST = args.includes('--only-whitelist')
 const DRY_RUN = args.includes('--dry')
 const NO_COMMENT = args.includes('--no-comment')
+const NO_DANMU = args.includes('--no-danmu')
+
+const DANMU_TEMPLATES = [
+  '哈哈哈哈哈哈',
+  '笑死我了',
+  '前方高能！',
+  '有意思~',
+  '牛啊牛啊',
+  '学到了学到了',
+  '哈哈 可以的',
+  '这波不错',
+  '666',
+  '种草了',
+  '有意思有意思',
+  '确实确实',
+  '哈哈笑死',
+  '这挺好的',
+  '学到了~',
+]
 
 const PROCESSED_FILE = path.join(DATA_DIR, 'follow-processed.json')
 const CONFIG_FILE = path.join(DATA_DIR, 'follow-config.json')
@@ -204,6 +223,35 @@ async function runArchiveActions(video) {
   await new Promise(s => setTimeout(s, 1500))
 }
 
+async function runDanmu(video) {
+  if (NO_DANMU) return
+  if (video.type !== 'video') {
+    console.log('   [danmu] 专栏无弹幕，跳过')
+    return
+  }
+  const msg = DANMU_TEMPLATES[Math.floor(Math.random() * DANMU_TEMPLATES.length)]
+  const flag = DRY_RUN ? "--dry" : "--go"
+  const scriptsDir = path.join(process.cwd(), "tools", "commands")
+  console.log("   [danmu] \"" + msg + "\"")
+  try {
+    const proc = spawn(process.execPath, [
+      path.join(scriptsDir, "danmu.mjs"),
+      "--oid", String(video.aid),
+      "--bvid", video.bvid,
+      "--message", msg,
+      flag,
+    ], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: process.cwd(),
+      env: spawnEnv(),
+    })
+    proc.stdout.on("data", d => process.stdout.write("   > " + d.toString()))
+    proc.stderr.on("data", d => process.stderr.write("   > ERR " + d.toString()))
+    await new Promise(res => proc.on("close", res))
+  } catch (e) {
+    console.log("   [danmu] err:", e.message)
+  }
+}
 const startedAt = Math.floor(Date.now() / 1000)
 
 function parseFeedItems(items) {
@@ -253,6 +301,53 @@ async function fetchOwnerFeed() {
   const j = await r.json()
   if (j?.code !== 0) throw new Error(`owner feed code=${j?.code} ${j?.message ?? ''}`)
   return parseFeedItems(j?.data?.items || [])
+}
+
+async function fetchPopularVideos() {
+  const r = await fetch('https://api.bilibili.com/x/web-interface/popular?ps=30&pn=1', { headers: H })
+  const j = await r.json()
+  if (j?.code !== 0) throw new Error(`popular code=${j?.code} ${j?.message ?? ''}`)
+  const out = []
+  for (const v of (j?.data?.list || [])) {
+    if (v.bvid && v.aid) {
+      out.push({
+        type: 'video',
+        bvid: v.bvid,
+        aid: v.aid,
+        title: String(v.title || '').replace(/<[^>]+>/g, ''),
+        upMid: v.owner?.mid || 0,
+        upName: v.owner?.name || '热门',
+        pubTs: Number(v.pubdate || Math.floor(Date.now() / 1000)),
+        play: Number(v.stat?.view || 0),
+      })
+    }
+  }
+  return out
+}
+
+let idleCount = 0
+async function runIdleActivity() {
+  idleCount++
+  const popular = await fetchPopularVideos().catch(e => { console.log(`   [idle] popular err: ${e.message}`); return [] })
+  const kwList = (mainCfg.preferences?.like || []).filter(Boolean)
+  const keyword = kwList.length ? kwList[Math.floor(Math.random() * kwList.length)] : ''
+
+  const pool = popular.filter(x => !processed.has('vid:' + x.bvid))
+  if (!pool.length) { console.log(`   [idle] 热门池空，跳过`); return }
+
+  const pick = pool[Math.floor(Math.random() * Math.min(3, pool.length))]
+  const key = 'vid:' + pick.bvid
+  if (processed.has(key)) return
+  processed.add(key)
+  saveProcessed()
+
+  console.log(`\n[IDLE #${idleCount}] 没人更新 ≫ 热门三连 + 弹幕${keyword ? ` (关键词: ${keyword})` : ''}`)
+  console.log(`   BV=${pick.bvid} aid=${pick.aid} play=${pick.play} title=${pick.title.slice(0, 50)}`)
+  if (pick.upName) console.log(`   UP主: ${pick.upName}`)
+
+  await runArchiveActions(pick)
+  await runDanmu(pick)
+  await new Promise(s => setTimeout(s, 2000 + Math.random() * 3000))
 }
 
 function pickCommentMsg(title) {
@@ -313,7 +408,7 @@ console.log(`   processed baseline: ${processed.size}`)
 if (OWNER_MID) console.log(`   [A-new] -> B like+fav+share+keyword-comment`)
 if (ONLY_WHITELIST) console.log(`   WARN: whitelist-only mode`)
 if (minAgeSec > 0) console.log(`   WARN: minAgeSec=${minAgeSec}`)
-if (NO_COMMENT) console.log(`   WARN: --no-comment 养号模式，只三连不发评论`)
+if (NO_COMMENT) console.log(`   WARN: --no-comment 养号模式，三连+弹幕不发评论`)
 if (DRY_RUN) console.log(`   WARN: DRY-RUN`)
 console.log(`   started: ${new Date().toLocaleString('zh-CN', { hour12: false })}`)
 
@@ -357,6 +452,7 @@ for (;;) {
         console.log(idLine)
 
         await runArchiveActions(v)
+        await runDanmu(v)
         await new Promise(s => setTimeout(s, 2000))
 
         if (NO_COMMENT) {
@@ -370,11 +466,14 @@ for (;;) {
 
         await new Promise(s => setTimeout(s, 2000 + Math.random() * 3000))
       }
-    } else if (!QUIET) {
+    } else {
       const newestPub = allItems[0]?.pubTs || 0
       const timeStr = newestPub ? new Date(newestPub * 1000).toLocaleString('zh-CN', { hour12: false }) : '?'
       const ownerCount = ownerItems?.length || 0
-      console.log(`  [${rounds}] ${new Date().toLocaleTimeString('zh-CN', { hour12: false })} no-new (latest=${timeStr}, ownerFeed=${ownerCount}, processed=${processed.size})`)
+      if (!QUIET) console.log(`  [${rounds}] ${new Date().toLocaleTimeString('zh-CN', { hour12: false })} no-new (latest=${timeStr}, ownerFeed=${ownerCount}, processed=${processed.size})`)
+      if (rounds % 3 === 0) {
+        try { await runIdleActivity() } catch (e) { console.log(`   [idle] err: ${e.message}`) }
+      }
     }
   } catch (e) {
     console.log(`  [${rounds}] poll failed: ${e.message} (continue)`)

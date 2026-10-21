@@ -121,6 +121,7 @@ async function renderDashboard(){
 }
 
 renderDashboard();
+loadAtMe();
 
 async function loadConfig(){
   try{
@@ -581,38 +582,122 @@ function abortAgent(){
   fetch('/api/abort',{method:'POST'}).then(function(){alert('中止信号已发送')}).catch(function(e){alert('失败 '+e.message)});
 }
 
+var _trajTimer=null;
+function _bjTime(s){try{return s?new Date(s).toLocaleTimeString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}).slice(0,8):''}catch{return ''}}
+function _renderTrajectory(d){
+  var el=document.getElementById('trajectory-panel');
+  if(!el)return;
+  var h='';
+  var cs=d.currentStatus||{};
+  var dot=cs.status==='running'?'<span style="display:inline-block;width:8px;height:8px;background:#52c41a;border-radius:50%;animation:pulse 1s infinite"></span>':'<span style="display:inline-block;width:8px;height:8px;background:#888;border-radius:50%"></span>';
+  h+='<div style="padding:10px 14px;background:#16212f;border-bottom:1px solid #333">';
+  h+='  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">';
+  h+='    <span style="color:#fff;font-weight:600">'+dot+' 当前状态</span>';
+  h+='    <span style="color:#aaa;font-size:11px">'+_bjTime(cs.lastAt)+'</span>';
+  h+='  </div>';
+  h+='  <div style="color:#38bdf8;font-size:13px">'+(cs.status==='running'?'🟢 在忙 · '+cs.activity:'⚪ 空闲中 · 上一次 '+cs.activity||'无记录')+'</div>';
+  h+='  <div style="color:#888;font-size:11px;margin-top:3px">'+(cs.detail||'')+'</div>';
+  h+='</div>';
+  h+='<div style="padding:12px;font-size:12.5px;font-family:monospace;color:#d0d4dc;line-height:1.75">';
+  if(d.runs&&d.runs.length){
+    h+='<div style="font-weight:700;margin:6px 0 6px;color:#fff">📋 活动流水 ('+d.runs.length+')</div>';
+    d.runs.slice(-30).forEach(function(r){
+      var t=_bjTime(r.time);
+      var ic=r.event==='start'?'🚀':r.event==='round'?'🔄':r.event==='tool'?'🛠️':r.event==='done'?'✅':r.event==='aborted'?'🛑':r.event==='api_error'?'❌':r.event==='forced'?'🛑':(r.event||'💭');
+      var col=r.event==='tool'?'#38bdf8':r.event==='api_error'?'#ff4d4f':r.event==='done'?'#52c41a':r.event==='thought'?'#c9d1d9':'#c9d1d9';
+      var detail='';
+      if(r.event==='thought'||r.event==='event'||r.event==='summary'){
+        detail=r.content||r.note||r.summary||'';
+      }else if(r.usage){detail=' usage:'+r.usage.total}
+      else if(r.tool){detail=' '+r.tool+' '+(r.args?JSON.stringify(r.args).slice(0,60):'')}
+      h+='<div style="color:'+col+';margin:2px 0">'+t+' '+ic+' '+(detail?'<span style="color:#8b949e">'+detail+'</span>':'')+'</div>';
+    });
+  }
+  if(d.tools&&d.tools.length){
+    h+='<div style="font-weight:700;margin:12px 0 6px;color:#fff">🛠️ 工具调用</div>';
+    d.tools.slice(-15).forEach(function(t){
+      var ti=_bjTime(t.time);
+      var col=t.status==='ok'?'#52c41a':t.status==='warn'?'#faad14':'#ff4d4f';
+      h+='<div style="color:'+col+';margin:2px 0">'+ti+' ['+t.status+'] '+t.label+': '+t.resultSize+'chars '+t.durationMs+'ms</div>';
+    });
+  }
+  if(!d.runs?.length&&!d.tools?.length)h+='<div style="color:#888">暂无数据</div>';
+  h+='</div>';
+  el.querySelector('.traj-body').innerHTML=h;
+}
 function showTrajectory(){
-  fetch('/api/trajectory').then(function(x){return x.json()}).then(function(d){
-    var h='<div style="padding:12px;font-size:13px;font-family:monospace;color:#d0d4dc;line-height:1.8">';
-    if(d.runs&&d.runs.length){
-      h+='<div style="font-weight:700;margin:10px 0 6px;color:#fff">📋 运行轨迹</div>';
-      d.runs.slice(-20).forEach(function(r){
-        var t=r.time?new Date(r.time).toLocaleTimeString('zh-CN',{hour12:false}):'';
-        var ic=r.event==='start'?'🚀':r.event==='round'?'🔄':r.event==='tool'?'🛠️':r.event==='done'?'✅':r.event==='aborted'?'🛑':r.event==='api_error'?'❌':(r.event||'');
-        var col=r.event==='tool'?'#38bdf8':r.event==='api_error'?'#ff4d4f':r.event==='done'?'#52c41a':'#c9d1d9';
-        var det=r.usage?' usage:'+r.usage.total:r.tool?' args:'+JSON.stringify(r.args||{}).slice(0,80):'';
-        h+='<div style="color:'+col+';margin:3px 0">'+t+' '+ic+' '+det+'</div>';
-      });
-    }
-    if(d.tools&&d.tools.length){
-      h+='<div style="font-weight:700;margin:14px 0 8px;color:#fff">🛠️ 工具调用历史</div>';
-      d.tools.slice(-15).forEach(function(t){
-        var ti=t.time?new Date(t.time).toLocaleTimeString('zh-CN',{hour12:false}):'';
-        var col=t.status==='ok'?'#52c41a':t.status==='warn'?'#faad14':'#ff4d4f';
-        h+='<div style="color:'+col+';margin:3px 0">'+ti+' ['+t.status+'] '+t.label+': '+t.resultSize+'chars '+t.durationMs+'ms</div>';
-      });
-    }
-    if(!d.runs?.length&&!d.tools?.length)h+='<div style="color:#888">暂无数据 — 还没运行过</div>';
-    h+='</div>';
-    var el=document.getElementById('trajectory-panel');
-    if(!el){
-      el=document.createElement('div');
-      el.id='trajectory-panel';
-      el.style.cssText='position:fixed;right:20px;bottom:20px;width:540px;max-height:620px;overflow-y:auto;background:#1a1b1f;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:9999;border:1px solid #333';
-      document.body.appendChild(el);
-    }
-    el.innerHTML='<div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;background:#25252e;border-radius:12px 12px 0 0;border-bottom:1px solid #333"><strong style="color:#fff">📋 AI活动轨迹</strong><button onclick="document.getElementById(\'trajectory-panel\').remove()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:22px;line-height:1">×</button></div>'+h;
-  }).catch(function(e){alert('加载失败 '+e.message)});
+  var el=document.getElementById('trajectory-panel');
+  if(!el){
+    el=document.createElement('div');
+    el.id='trajectory-panel';
+    el.style.cssText='position:fixed;right:20px;bottom:20px;width:560px;max-height:720px;background:#1a1b1f;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:9999;border:1px solid #333;overflow:hidden;display:flex;flex-direction:column';
+    el.innerHTML='<div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;background:#25252e;border-bottom:1px solid #333"><strong style="color:#fff">📋 AI活动轨迹</strong><button onclick="closeTrajectory()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:20px;line-height:1">×</button></div><div class="traj-body" style="overflow-y:auto;flex:1"></div>';
+    document.body.appendChild(el);
+  }
+  function load(){
+    fetch('/api/trajectory').then(function(x){return x.json()}).then(_renderTrajectory).catch(function(e){var b=el.querySelector('.traj-body');if(b)b.innerHTML='<div style="padding:20px;color:#ff4d4f">加载失败 '+e.message+'</div>'});
+  }
+  load();
+  if(_trajTimer)clearInterval(_trajTimer);
+  _trajTimer=setInterval(load,10000);
+}
+function closeTrajectory(){
+  if(_trajTimer){clearInterval(_trajTimer);_trajTimer=null}
+  var el=document.getElementById('trajectory-panel');if(el)el.remove();
 }
 
 fetch('/api/version').then(function(x){return x.json()}).then(function(d){var el=document.getElementById('ver-badge');if(el)el.textContent='v'+(d.version||'?')}).catch(function(){});
+
+async function loadAtMe(){
+  var listEl=document.getElementById('at-me-list');
+  var badge=document.getElementById('at-me-badge');
+  if(!listEl)return;
+  listEl.textContent='加载中...';
+  if(badge){badge.className='tag offline';badge.textContent='加载中'}
+  try{
+    var d=await fetch('/api/at-me').then(function(r){return r.json()});
+    if(d.error){listEl.innerHTML='<div style="color:#ff4d4f">'+d.error+'</div>';return}
+    var items=d.items||[];
+    if(badge){badge.className='tag '+(items.length>0?'online':'offline');badge.textContent=items.length>0?('主人 '+items.length+' 条未回'):'没有主人的艾特'}
+    if(items.length===0){listEl.innerHTML='<div style="color:#888;padding:16px 0;text-align:center">好钢用在刀刃上——目前没有主人的未处理艾特</div>';return}
+    var h='';
+    items.forEach(function(it){
+      var time=new Date(it.at_time*1000);
+      var timeStr=time.toLocaleString('zh-CN',{hour12:false});
+      h+='<div style="border:1px solid #2a2d35;border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#15171c">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+      h+='<a href="https://www.bilibili.com/video/'+it.bvid+'" target="_blank" style="color:#1890ff;font-weight:600;text-decoration:none">'+it.nickname+'</a>';
+      h+='<span style="color:#888;font-size:13px">'+timeStr+'</span>';
+      h+='</div>';
+      h+='<div style="color:#c9d1d9;margin-bottom:10px;font-size:15px">'+(it.content||'(无内容)')+'</div>';
+      h+='<div style="display:flex;gap:8px;align-items:center">';
+      h+='<button class="btn primary" onclick="replyAtEvent('+it.id+')" id="reply-btn-'+it.id+'">✨ 一键回复</button>';
+      h+='<a href="https://www.bilibili.com/video/'+it.bvid+'#reply'+it.source_id+'" target="_blank" style="font-size:13px;color:#888">前往视频</a>';
+      h+='</div>';
+      h+='<div id="reply-result-'+it.id+'" style="margin-top:8px"></div>';
+      h+='</div>';
+    });
+    listEl.innerHTML=h;
+  }catch(e){listEl.innerHTML='<div style="color:#ff4d4f">加载失败: '+e.message+'</div>'}
+}
+
+async function replyAtEvent(id){
+  var btn=document.getElementById('reply-btn-'+id);
+  var resEl=document.getElementById('reply-result-'+id);
+  if(!btn)return;
+  btn.disabled=true;btn.textContent='生成中...';
+  if(resEl)resEl.innerHTML='';
+  try{
+    var r=await fetch('/api/reply-at',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:String(id)})});
+    var d=await r.json();
+    if(d.error){if(resEl)resEl.innerHTML='<div style="color:#ff4d4f;margin-top:6px">❌ '+d.error+'</div>';btn.disabled=false;btn.textContent='✨ 一键回复';return}
+    if(resEl){
+      resEl.innerHTML='<div style="color:#52c41a;margin-top:6px;padding:8px 12px;background:#162316;border-radius:8px"><div style="font-weight:600;margin-bottom:4px">✅ 已发出：</div><div style="color:#c9d1d9">'+(d.message||'')+'</div></div>';
+    }
+    btn.disabled=true;btn.textContent='✅ 已回复';
+    setTimeout(loadAtMe,1500);
+  }catch(e){
+    if(resEl)resEl.innerHTML='<div style="color:#ff4d4f;margin-top:6px">❌ '+e.message+'</div>';
+    btn.disabled=false;btn.textContent='✨ 一键回复';
+  }
+}

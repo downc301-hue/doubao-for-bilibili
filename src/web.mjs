@@ -138,6 +138,53 @@ function readWhaleLog() {
   } catch { return [] }
 }
 
+function computeCurrentStatus(agent, whaleLogs) {
+  const now = Date.now()
+  let lastAt = 0
+  let lastActivity = ''
+  let running = false
+  let detail = ''
+
+  if (whaleLogs && whaleLogs.length) {
+    const last = whaleLogs[whaleLogs.length - 1]
+    if (last.at) lastAt = new Date(last.at).getTime()
+    if (last.kind === 'tool_call' || last.kind === 'action') {
+      lastActivity = (last.note || last.tool || last.target || 'tool').slice(0, 40)
+      if (last.success === false) detail = '⚠️ 上次调用失败'
+    } else if (last.kind === 'thought' || last.kind === 'event') {
+      lastActivity = (last.event || last.note || '思考中').slice(0, 40)
+    } else {
+      lastActivity = (last.note || last.kind || '').slice(0, 40)
+    }
+  }
+
+  if (agent) {
+    const agentStart = agent.startAt ? new Date(agent.startAt).getTime() : 0
+    const agentEnd = agent.endAt ? new Date(agent.endAt).getTime() : 0
+    if (agent.status === 'running' || (agent.startAt && !agent.endAt)) {
+      running = true
+      if (agentStart > lastAt) lastAt = agentStart
+      lastActivity = 'AI agent 运行中 · 第 ' + (agent.rounds || '?') + ' 轮'
+      detail = (agent.promptFile || '').split(/[\\/]/).pop() || '自动任务'
+    } else if (agent.status === 'done') {
+      if (agentEnd > lastAt) lastAt = agentEnd
+    }
+  }
+
+  const secAgo = lastAt ? Math.floor((now - lastAt) / 1000) : 0
+  let ageStr = ''
+  if (secAgo < 60) ageStr = secAgo + 's ago'
+  else if (secAgo < 3600) ageStr = Math.floor(secAgo / 60) + 'min ago'
+  else ageStr = Math.floor(secAgo / 3600) + 'h ago'
+
+  return {
+    status: running ? 'running' : 'idle',
+    activity: lastActivity || '无记录',
+    detail: detail + (ageStr ? ' · ' + ageStr : ''),
+    lastAt: lastAt ? new Date(lastAt).toISOString() : null,
+  }
+}
+
 const DATA_DIR = resolveDataDir()
 const PORT = process.env.PORT || 7890
 const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version || '0.0.0'
@@ -676,8 +723,10 @@ async function api(req, res, pathname) {
   if (pathname === '/api/trajectory' && req.method === 'GET') {
     let runs = []
     let tools = []
+    let agentStatus = null
     try {
       const agent = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'agent-state.json'), 'utf8'))
+      agentStatus = agent
       if (agent) {
         if (agent.status === 'running') runs.push({ event: 'start', time: agent.startAt })
         else if (agent.status === 'done') {
@@ -686,6 +735,8 @@ async function api(req, res, pathname) {
         } else if (agent.status === 'aborted') {
           runs.push({ event: 'start', time: agent.startAt })
           runs.push({ event: 'aborted', time: agent.endAt || agent.startAt, reason: agent.reason })
+        } else if (agent.status === 'forced') {
+          runs.push({ event: 'forced', time: agent.endAt || agent.startAt, reason: agent.reason })
         } else {
           runs.push({ event: agent.status, time: agent.startAt })
         }
@@ -702,12 +753,15 @@ async function api(req, res, pathname) {
           durationMs: e.durationMs || 0,
         })
       } else if (e.kind === 'thought' || e.kind === 'event' || e.kind === 'summary') {
-        if (e.at) runs.push({ event: 'thought', time: e.at, content: String(e.event || e.note || '').slice(0, 60) })
+        if (e.at) runs.push({ event: e.kind || 'thought', time: e.at, content: String(e.event || e.note || e.summary || '').slice(0, 80) })
       }
     }
     runs = runs.sort((a, b) => new Date(a.time) - new Date(b.time))
     tools = tools.sort((a, b) => new Date(a.time) - new Date(b.time))
-    return send(res, 200, JSON.stringify({ runs, tools }))
+
+    const currentStatus = computeCurrentStatus(agentStatus, whaleLogs)
+
+    return send(res, 200, JSON.stringify({ runs, tools, currentStatus }))
   }
   if (pathname === '/api/bili/unfollow' && req.method === 'POST') {
     const body = await parseBody(req)
