@@ -110,10 +110,14 @@ function toBeijingDate(isoStr) {
 function toBeijingTime(isoStr) {
   try {
     const d = new Date(isoStr)
-    const hh = String((d.getUTCHours() + 8) % 24).padStart(2, '0')
-    const mm = String(d.getUTCMinutes()).padStart(2, '0')
-    const ss = String(d.getUTCSeconds()).padStart(2, '0')
-    return `${hh}:${mm}:${ss}`
+    const bjMs = d.getTime() + 8 * 3600 * 1000
+    const utcDay = new Date(bjMs)
+    const MM = String(utcDay.getUTCMonth() + 1).padStart(2, '0')
+    const DD = String(utcDay.getUTCDate()).padStart(2, '0')
+    const hh = String(utcDay.getUTCHours()).padStart(2, '0')
+    const mm = String(utcDay.getUTCMinutes()).padStart(2, '0')
+    const ss = String(utcDay.getUTCSeconds()).padStart(2, '0')
+    return `${MM}-${DD} ${hh}:${mm}:${ss}`
   } catch { return '' }
 }
 function toBeijingFull(isoStr) {
@@ -742,10 +746,15 @@ async function api(req, res, pathname) {
     let tools = []
     let agentStatus = null
     const bj = (iso) => toBeijingTime(iso)
+    const nowMs = Date.now()
+    const threeDays = 3 * 24 * 3600 * 1000
+    const recent = (iso) => {
+      try { return (nowMs - new Date(iso).getTime()) < threeDays } catch { return true }
+    }
     try {
       const agent = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'agent-state.json'), 'utf8'))
       agentStatus = agent
-      if (agent) {
+      if (agent && recent(agent.startAt || agent.endAt)) {
         if (agent.status === 'running') runs.push({ event: 'start', time: bj(agent.startAt), _raw: agent.startAt })
         else if (agent.status === 'done') {
           runs.push({ event: 'start', time: bj(agent.startAt), _raw: agent.startAt })
@@ -762,6 +771,7 @@ async function api(req, res, pathname) {
     } catch {}
     const whaleLogs = readWhaleLog()
     for (const e of whaleLogs) {
+      if (!e.at || !recent(e.at)) continue
       if (e.kind === 'tool_call' || e.kind === 'action') {
         tools.push({
           time: bj(e.at),
@@ -772,7 +782,7 @@ async function api(req, res, pathname) {
           durationMs: e.durationMs || 0,
         })
       } else if (e.kind === 'thought' || e.kind === 'event' || e.kind === 'summary') {
-        if (e.at) runs.push({ event: e.kind || 'thought', time: bj(e.at), _raw: e.at, content: String(e.event || e.note || e.summary || '').slice(0, 80) })
+        runs.push({ event: e.kind || 'thought', time: bj(e.at), _raw: e.at, content: String(e.event || e.note || e.summary || '').slice(0, 80) })
       }
     }
     runs = runs.sort((a, b) => new Date(a._raw || a.time) - new Date(b._raw || b.time))

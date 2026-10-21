@@ -583,7 +583,7 @@ function abortAgent(){
 }
 
 var _trajTimer=null;
-function _bjTime(s){if(!s)return '';if(typeof s==='string'&&/^\d{2}:\d{2}:\d{2}$/.test(s))return s;try{return new Date(s).toLocaleTimeString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}).slice(0,8)}catch{return s||''}}
+function _bjTime(s){if(!s)return '';if(typeof s==='string'&&(/^\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)||/^\d{2}:\d{2}:\d{2}$/.test(s)))return s;try{return new Date(s).toLocaleTimeString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}).slice(0,8)}catch{return s||''}}
 function _renderTrajectory(d){
   var el=document.getElementById('trajectory-panel');
   if(!el)return;
