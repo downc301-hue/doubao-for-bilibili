@@ -13,7 +13,7 @@
     localStorage.setItem('theme',t);
     document.documentElement.setAttribute('data-theme',t);
     var b=document.getElementById('btn-theme');
-    if(b)b.textContent=t==='light'?'☀️':'🌙';
+    if(b)b.textContent=t==='light'?'<span class="iconfont icon-sun" style="font-size:14px"></span>':'<span class="iconfont icon-moon" style="font-size:14px"></span>';
   }
   var c=localStorage.getItem('fs')||'19';
   if(c==='15')setFS('sm');else if(c==='24')setFS('lg');else setFS('md');
@@ -573,7 +573,7 @@ function testCreds(){
     if(d.bili)p.push('B站: '+(d.bili.ok?'✅':'❌')+' '+(d.bili.message||''));
     if(r){r.innerHTML=p.join('<br>');r.style.color=(d.doubao?.ok&&d.bili?.ok)?'#52c41a':'#ff4d4f'}
   }).catch(function(e){if(r){r.textContent='请求失败 '+e.message;r.style.color='#ff4d4f'}}).finally(function(){
-    b.disabled=false;b.textContent='🔗 测试凭据'
+    b.disabled=false;b.textContent='<span class="iconfont icon-feedback"></span> 测试凭据'
   });
 }
 
@@ -595,34 +595,34 @@ function _renderTrajectory(d){
   h+='    <span style="color:#fff;font-weight:600">'+dot+' 当前状态</span>';
   h+='    <span style="color:#aaa;font-size:11px">'+_bjTime(cs.lastAt)+'</span>';
   h+='  </div>';
-  h+='  <div style="color:#38bdf8;font-size:13px">'+(cs.status==='running'?'🟢 在忙 · '+cs.activity:'⚪ 空闲中 · 上一次 '+cs.activity||'无记录')+'</div>';
+  h+='  <div style="color:#38bdf8;font-size:13px">'+(cs.status==='running'?'<span class="iconfont icon-dot" style="color:#52c41a"></span> 在忙 · '+cs.activity:'<span class="iconfont icon-dot" style="color:#888"></span> 空闲中 · 上一次 '+cs.activity||'无记录')+'</div>';
   h+='  <div style="color:#888;font-size:11px;margin-top:3px">'+(cs.detail||'')+'</div>';
   h+='</div>';
   h+='<div style="padding:8px 14px;background:'+(d.followRunning?'#0d2818':'#2a1010')+';border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center">';
-  h+='  <span style="font-size:12px;color:'+(d.followRunning?'#52c41a':'#ff7875')+'">'+(d.followRunning?'🟢 关注守望运行中':'🔴 关注守望已停止')+'</span>';
-  h+='  <span style="font-size:11px;color:#888">'+(d.whaleMtime?'日记文件最后更新: '+d.whaleMtime:'无日记文件')+'</span>';
+  h+='  <span style="font-size:12px;color:'+(d.followRunning?'#52c41a':'#ff7875')+'">'+(d.followRunning?'<span class="iconfont icon-dot" style="color:#52c41a"></span> 关注守望运行中':'<span class="iconfont icon-dot" style="color:#ff4d4f"></span> 关注守望已停止')+'</span>';
+  h+='  <span class="iconfont icon-doubao" style="font-size:10px;margin-right:3px;color:#ff6b35"></span><span style="font-size:11px;color:#888">'+(d.whaleMtime?'日记文件最后更新: '+d.whaleMtime:'无日记文件')+'</span>';
   h+='</div>';
   h+='<div style="padding:12px;font-size:12.5px;font-family:monospace;color:#d0d4dc;line-height:1.75">';
   if(d.runs&&d.runs.length){
-    h+='<div style="font-weight:700;margin:6px 0 6px;color:#fff">📋 活动流水 ('+d.runs.length+')</div>';
+    h+='<div style="font-weight:700;margin:6px 0 6px;color:#fff"><span class="iconfont icon-trajectory"></span> 活动流水 ('+d.runs.length+')</div>';
     d.runs.slice(-30).reverse().forEach(function(r){
       var t=_bjTime(r.time);
-      var ic=r.event==='start'?'🚀':r.event==='round'?'🔄':r.event==='tool'?'🛠️':r.event==='done'?'✅':r.event==='aborted'?'🛑':r.event==='api_error'?'❌':r.event==='forced'?'🛑':r.event==='wake'?'⏰':r.event==='thought'?'💭':r.event==='comment'?'💬':r.event==='feeling'?'😊':r.event==='summary'?'📝':'💭';
+      var ic=r.event==='start'?'<span class="iconfont icon-play"></span>':r.event==='round'?'<span class="iconfont icon-refresh"></span>':r.event==='tool'?'<span class="iconfont icon-settings"></span>':r.event==='done'?'<span class="iconfont icon-done"></span>':r.event==='aborted'?'<span class="iconfont icon-x"></span>':r.event==='api_error'?'<span class="iconfont icon-report"></span>':r.event==='forced'?'<span class="iconfont icon-x"></span>':r.event==='wake'?'<span class="iconfont icon-bell"></span>':r.event==='thought'?'<span class="iconfont icon-message"></span>':r.event==='comment'?'<span class="iconfont icon-edit-pen"></span>':r.event==='feeling'?'<span class="iconfont icon-qa"></span>':r.event==='summary'?'<span class="iconfont icon-history"></span>':'<span class="iconfont icon-plus-circle"></span>';
       var col=r.event==='tool'?'#38bdf8':r.event==='api_error'?'#ff4d4f':r.event==='done'?'#52c41a':r.event==='comment'?'#95de64':r.event==='summary'?'#ffd666':r.event==='wake'?'#36cfc9':'#c9d1d9';
       var detail='';
       if(r.event==='thought'||r.event==='event'||r.event==='summary'){
         detail=r.content||r.note||r.summary||'';
       }else if(r.usage){detail=' usage:'+r.usage.total}
       else if(r.tool){detail=' '+r.tool+' '+(r.args?JSON.stringify(r.args).slice(0,60):'')}
-      h+='<div style="color:'+col+';margin:2px 0">'+t+' '+ic+' '+(detail?'<span style="color:#8b949e">'+detail+'</span>':'')+'</div>';
+      var _detail=detail||''; if(r.link&&r.target){_detail=_detail.replace(r.target,'<a href="'+r.link+'" target="_blank" style="color:#40a9ff;text-decoration:none">'+r.target+'</a>')} h+='<div style="color:'+col+';margin:2px 0">'+t+' '+ic+' '+_detail+'</div>';
     });
   }
   if(d.tools&&d.tools.length){
-    h+='<div style="font-weight:700;margin:12px 0 6px;color:#fff">🛠️ 工具调用</div>';
+    h+='<div style="font-weight:700;margin:12px 0 6px;color:#fff"><span class="iconfont icon-settings"></span> 工具调用</div>';
     d.tools.slice(-15).reverse().forEach(function(t){
       var ti=_bjTime(t.time);
       var col=t.status==='ok'?'#52c41a':t.status==='warn'?'#faad14':'#ff4d4f';
-      h+='<div style="color:'+col+';margin:2px 0">'+ti+' ['+t.status+'] '+t.label+': '+t.resultSize+'chars '+t.durationMs+'ms</div>';
+      var _lbl=t.label; if(t.link&&t.target){_lbl=_lbl.replace(t.target,'<a href="'+t.link+'" target="_blank" style="color:#40a9ff;text-decoration:none;font-weight:600">'+t.target+'</a>')} h+='<div style="color:'+col+';margin:2px 0">'+ti+' ['+t.status+'] '+_lbl+': '+t.resultSize+'chars '+t.durationMs+'ms</div>';
     });
   }
   if(!d.runs?.length&&!d.tools?.length)h+='<div style="color:#888">暂无数据</div>';
@@ -743,17 +743,35 @@ function loadDailyReport() {
       var archives = d.archives || 0, danmus = d.danmus || 0, comments = d.comments || 0;
       var archiveOk = archives >= 30, danmuOk = danmus >= 30, commentOk = comments >= 5;
       var parts = [];
-      parts.push('<span style="color:'+ (archiveOk ? '#52c41a' : '#faad14') +'">🔁 三连 '+archives+'/30</span>');
-      parts.push('<span style="color:'+ (danmuOk ? '#52c41a' : '#faad14') +'">💬 弹幕 '+danmus+'/30</span>');
+      parts.push('<span style="color:'+ (archiveOk ? '#52c41a' : '#faad14') +'"><span class="iconfont icon-bookmark-check" style="vertical-align:-2px"></span> 三连 '+archives+'/30</span>');
+      parts.push('<span style="color:'+ (danmuOk ? '#52c41a' : '#faad14') +'"><span class="iconfont icon-barrage" style="vertical-align:-2px"></span> 弹幕 '+danmus+'/30</span>');
       var cfg = null;
       try { cfg = document.getElementById('fw-nc') } catch {}
       var noComment = cfg ? cfg.checked : false;
       if (noComment) {
-        parts.push('<span style="color:#888">📝 评论（养号模式已关）</span>');
+        parts.push('<span style="color:#888"><span class="iconfont icon-edit-pen" style="vertical-align:-2px"></span> 评论（养号模式已关）</span>');
       } else {
-        parts.push('<span style="color:'+ (commentOk ? '#52c41a' : '#faad14') +'">📝 评论 '+comments+'/5</span>');
+        parts.push('<span style="color:'+ (commentOk ? '#52c41a' : '#faad14') +'"><span class="iconfont icon-edit-pen" style="vertical-align:-2px"></span> 评论 '+comments+'/5</span>');
       }
       planText.innerHTML = parts.join(' &nbsp;·&nbsp; ') + '<span style="color:#888;margin-left:12px">· 每 3 轮 idle 自动触发热门互动</span>';
+      var actBox = document.getElementById('daily-actions');
+      if (actBox && d.actions && d.actions.length) {
+        var h = '<div style="font-size:12px;color:#888;margin-bottom:6px"><span class="iconfont icon-list" style="vertical-align:-2px"></span> 今日已操作 · 点击可跳转视频</div>';
+        d.actions.slice(0,20).forEach(function(a){
+          var t=new Date(a.t); var ts=t.toLocaleTimeString('zh-CN',{hour12:false,timeZone:'Asia/Shanghai'}).slice(0,5);
+          var toolMap={archive:'三连',danmu:'弹幕',like:'点赞',fav:'收藏',share:'分享',comment:'评论',action:'动作'};
+          var label=toolMap[a.tool]||a.tool||'操作';
+          var note=(a.note||'').slice(0,40);
+          var col=a.success===false?'#ff7875':'#a6e3a1';
+          h += '<div style="display:flex;gap:8px;align-items:center;margin:3px 0;font-size:12px">';
+          h += '<span style="color:#666;font-family:monospace">'+ts+'</span>';
+          h += '<span style="color:'+col+'">'+label+'</span>';
+          if(a.link) h += '<a href="'+a.link+'" target="_blank" style="color:#40a9ff;text-decoration:none;font-weight:600;font-family:monospace">'+a.target+'</a>';
+          h += '<span style="color:#888;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+note+'</span>';
+          h += '</div>';
+        });
+        actBox.innerHTML = h;
+      } else if (actBox) { actBox.innerHTML = ''; }
     }
   }).catch(function(){});
 }

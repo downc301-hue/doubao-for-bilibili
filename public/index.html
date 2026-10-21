@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>豆包 B站分身 · 控制台</title>
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="iconfont.css">
 <script>
 (function(){
   var t=localStorage.getItem('theme')||'dark';
@@ -17,21 +18,21 @@
 <body>
 <header style="display:flex;justify-content:space-between;align-items:center">
   <div>
-    <h1>豆包 B站分身 <span class="ver-badge" id="ver-badge">v0.0.0</span></h1>
+    <h1><span class="iconfont icon-doubao" style="font-size:22px;vertical-align:-6px;color:#ff6b35;margin-right:6px"></span>豆包 B站分身 <span class="ver-badge" id="ver-badge">v0.0.0</span></h1>
     <p>自主刷B站 · 自己写日记 · 帮用户引流</p>
   </div>
   <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
     <div style="display:flex;gap:8px;align-items:center">
-      <button onclick="testCreds()" id="btn-test-creds" style="padding:6px 14px;background:#52c41a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px">🔗 测试凭据</button>
-      <button onclick="abortAgent()" id="btn-abort" style="padding:6px 14px;background:#ff4d4f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px">🛑 中止AI</button>
-      <button onclick="showTrajectory()" style="padding:6px 14px;background:#1890ff;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px">📋 查看轨迹</button>
+      <button onclick="testCreds()" id="btn-test-creds" style="padding:6px 14px;background:#52c41a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px"><span class="iconfont icon-link" style=""></span> 测试凭据</button>
+      <button onclick="abortAgent()" id="btn-abort" style="padding:6px 14px;background:#ff4d4f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px"><span class="iconfont icon-close" style=""></span> 中止AI</button>
+      <button onclick="showTrajectory()" style="padding:6px 14px;background:#1890ff;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:500;font-size:13px"><span class="iconfont icon-trajectory" style=""></span> 查看轨迹</button>
       <span id="creds-test-result" style="margin-left:6px;font-size:13px;vertical-align:middle;color:#c9d1d9"></span>
     </div>
     <div class="theme-bar">
       <button id="btn-fs-sm" title="小字体">小</button>
       <button id="btn-fs-md" title="中字体" class="active">中</button>
       <button id="btn-fs-lg" title="大字体">大</button>
-      <button id="btn-theme" title="切换明/暗模式">🌙</button>
+      <button id="btn-theme" title="切换明/暗模式"><span class="iconfont icon-moon" style="font-size:16px"></span></button>
     </div>
   </div>
 </header>
@@ -49,28 +50,28 @@
 
 <div class="pane active" id="pane-overview">
   <div class="card">
-    <h2>🎯 今日养号进度 <span id="daily-date" style="font-size:12px;color:#888;margin-left:8px"></span></h2>
+    <h2><span class="iconfont icon-checkbox" style="vertical-align:-2px;margin-right:4px"></span>今日养号进度 <span id="daily-date" style="font-size:12px;color:#888;margin-left:8px"></span></h2>
     <div id="daily-report" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px;margin-top:14px">
       <div class="mini-stat" data-role="archives">
-        <div class="mini-icon">🔁</div>
+        <div class="mini-icon"><span class="iconfont icon-bookmark-check" style=""></span></div>
         <div class="mini-num" data-target="0">0</div>
         <div class="mini-label">三连（喜欢+收藏+分享）</div>
         <div class="mini-bar"><div></div></div>
       </div>
       <div class="mini-stat" data-role="danmus">
-        <div class="mini-icon">💬</div>
+        <div class="mini-icon"><span class="iconfont icon-message" style=""></span></div>
         <div class="mini-num" data-target="0">0</div>
         <div class="mini-label">弹幕</div>
         <div class="mini-bar"><div></div></div>
       </div>
       <div class="mini-stat" data-role="comments">
-        <div class="mini-icon">📝</div>
+        <div class="mini-icon"><span class="iconfont icon-edit-pen" style=""></span></div>
         <div class="mini-num" data-target="0">0</div>
         <div class="mini-label">评论</div>
         <div class="mini-bar"><div></div></div>
       </div>
       <div class="mini-stat" data-role="interactions">
-        <div class="mini-icon">🎯</div>
+        <div class="mini-icon"><span class="iconfont icon-checkbox" style="font-size:20px"></span></div>
         <div class="mini-num" data-target="0">0</div>
         <div class="mini-label">今日互动总计</div>
         <div class="mini-bar total"><div></div></div>
@@ -79,22 +80,23 @@
     <div style="margin-top:14px;padding:10px 12px;background:#f6f8fa;border-radius:8px;font-size:13px;color:#555" id="daily-plan">
       <span id="plan-text">加载中...</span>
     </div>
+    <div id="daily-actions" style="margin-top:10px;max-height:280px;overflow-y:auto;padding:8px 12px;background:#fafbfc;border:1px solid #eee;border-radius:8px"></div>
   </div>
   <div class="card">
     <h2>👤 小号生态 <span id="bili-uname" style="font-size:12px;color:#888;margin-left:8px"></span></h2>
     <div id="bili-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:14px">
       <div class="mini-stat bili-green" data-role="following">
-        <div class="mini-icon">➕</div>
+        <div class="mini-icon"><span class="iconfont icon-plus-follow" style=""></span></div>
         <div class="mini-num" data-target="0">0</div>
         <div class="mini-label">关注（带的人）</div>
       </div>
       <div class="mini-stat bili-pink" data-role="follower">
-        <div class="mini-icon">👥</div>
+        <div class="mini-icon"><span class="iconfont icon-plus-follow" style="font-size:20px"></span></div>
         <div class="mini-num" data-target="0">0</div>
         <div class="mini-label">粉丝（带小号的人）</div>
       </div>
       <div class="mini-stat bili-yellow" data-role="likes">
-        <div class="mini-icon">❤️</div>
+        <div class="mini-icon"><span class="iconfont icon-heart" style="font-size:20px;color:#ff6b6b"></span></div>
         <div class="mini-num" data-target="0">0</div>
         <div class="mini-label">累计被点赞</div>
       </div>
@@ -104,7 +106,7 @@
         <div class="mini-label">未读 @ 你</div>
       </div>
       <div class="mini-stat bili-purple" data-role="reply">
-        <div class="mini-icon">💭</div>
+        <div class="mini-icon"><span class="iconfont icon-qa" style=""></span></div>
         <div class="mini-num" data-target="0">0</div>
         <div class="mini-label">未读 回复</div>
       </div>
@@ -119,7 +121,7 @@
     <h2>系统状态</h2>
     <div class="grid">
       <div class="stat clickable" id="stat-tokens" onclick="showTokenChart()" title="点击查看消耗趋势">
-        <div class="label">今日 Token / 预算 <span class="hint-link">📈</span></div>
+        <div class="label">今日 Token / 预算 <span class="hint-link"><span class="iconfont icon-ranking" style="vertical-align:-2px"></span></span></div>
         <div class="value" id="stat-tokens-value">-- / --</div>
         <div class="bar" id="stat-tokens-bar"><div style="width:0%"></div></div>
       </div>
@@ -142,10 +144,10 @@
     <div id="latest-diary-body"></div>
   </div>
   <div class="card">
-    <h2>🐋 主人的艾特 <span id="at-me-badge" class="tag offline">加载中</span></h2>
+    <h2><span class="iconfont icon-deepseek" style="vertical-align:-4px;font-size:18px"></span> 主人的艾特 <span id="at-me-badge" class="tag offline">加载中</span></h2>
     <p class="mini">好钢用在刀刃上——只回复主人的艾特，其他人的一律不回。点击"一键回复"让豆包生成合适的评论并自动发出。</p>
     <div class="row" style="margin-top:8px">
-      <button class="btn ghost" onclick="loadAtMe()">🔄 刷新艾特</button>
+      <button class="btn ghost" onclick="loadAtMe()"><span class="iconfont icon-refresh" style="vertical-align:-2px"></span> 刷新艾特</button>
     </div>
     <div id="at-me-list" style="margin-top:12px">正在拉取主人的 @ 列表...</div>
   </div>
@@ -254,7 +256,7 @@
   </div>
 
   <div class="card">
-    <h2>📝 活动日记 <span id="diary-auto-tag" class="tag">加载中</span></h2>
+    <h2><span class="iconfont icon-edit-pen" style="vertical-align:-2px"></span> 活动日记 <span id="diary-auto-tag" class="tag">加载中</span></h2>
     <p class="mini">自动日记已关闭。点击下方按钮，基于今天的工具调用记录（看过哪些视频、评论、关注变化等），让豆包生成一篇总结性日记写入日志。</p>
     <div class="row">
       <label>自动日记</label>
@@ -262,7 +264,7 @@
       <span class="mini">关闭后分身不会被强制写日记，节省 token</span>
     </div>
     <div class="row">
-      <button class="btn" id="btn-gen-diary">✨ 生成今日日记总结</button>
+      <button class="btn" id="btn-gen-diary"><span class="iconfont icon-diary" style="vertical-align:-2px;margin-right:4px"></span> 生成今日日记总结</button>
     </div>
     <div id="diary-gen-result" class="mini" style="display:none;margin-top:8px"></div>
   </div>
@@ -281,7 +283,7 @@
   </div>
 
   <div class="card">
-    <h2>🎬 关注列表抢前排 <span id="fw-status" class="tag offline">加载中</span></h2>
+    <h2><span class="iconfont icon-play" style="vertical-align:-2px"></span> 关注列表抢前排 <span id="fw-status" class="tag offline">加载中</span></h2>
     <p class="mini">后台 0 token 守望关注的 UP 主，一旦有新投稿立刻用预设文案抢前排。Web 服务启动时自动拉起。</p>
     <div class="row">
       <label>启用守望</label>

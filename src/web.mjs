@@ -774,7 +774,8 @@ async function api(req, res, pathname) {
     const whaleLogs = readWhaleLog()
     for (const e of whaleLogs) {
       if (!e.at || !recent(e.at)) continue
-      if (e.kind === 'tool_call' || e.kind === 'action') {
+      const _link = e.target ? `https://www.bilibili.com/video/${e.target}` : null
+      if (e.kind === 'tool_call' || e.kind === 'action' || e.kind === 'comment') {
         tools.push({
           time: bj(e.at),
           _raw: e.at,
@@ -782,9 +783,12 @@ async function api(req, res, pathname) {
           label: e.note || e.tool || e.target || '',
           resultSize: e.note ? String(e.note).length : 0,
           durationMs: e.durationMs || 0,
+          tool: e.tool,
+          target: e.target,
+          link: _link,
         })
       } else {
-        runs.push({ event: e.kind || 'event', time: bj(e.at), _raw: e.at, content: String(e.event || e.note || e.summary || '').slice(0, 80) })
+        runs.push({ event: e.kind || 'event', time: bj(e.at), _raw: e.at, content: String(e.event || e.note || e.summary || '').slice(0, 80), target: e.target, link: _link })
       }
     }
     runs = runs.sort((a, b) => new Date(a._raw || a.time) - new Date(b._raw || b.time))
@@ -819,15 +823,18 @@ async function api(req, res, pathname) {
     const today = bjDate(new Date().toISOString())
     const todayLogs = whaleLogs.filter(e => bjDate(e.at) === today)
     let archives = 0, danmus = 0, comments = 0, likes = 0, favs = 0, shares = 0
+    const actions = []
     for (const e of todayLogs) {
-      if (e.kind === 'tool_call') {
+      if (e.kind === 'tool_call' || e.kind === 'action') {
         if (e.tool === 'archive') archives++
         if (e.tool === 'danmu') danmus++
         if (e.tool === 'like') likes++
         if (e.tool === 'fav') favs++
         if (e.tool === 'share') shares++
+        if (e.target) actions.push({ t: e.at, tool: e.tool, target: e.target, link: `https://www.bilibili.com/video/${e.target}`, note: e.note || '', success: e.success !== false })
       } else if (e.kind === 'comment') {
         comments++
+        if (e.target) actions.push({ t: e.at, tool: 'comment', target: e.target, link: `https://www.bilibili.com/video/${e.target}`, note: e.note || e.text || '', success: e.success !== false })
       }
     }
     return send(res, 200, JSON.stringify({
@@ -835,6 +842,7 @@ async function api(req, res, pathname) {
       archives, danmus, comments, likes, favs, shares,
       interactions: archives + danmus + comments,
       totalLogs: todayLogs.length,
+      actions: actions.slice(-80).reverse(),
     }))
   }
   if (pathname === '/api/bili-stats' && req.method === 'GET') {
