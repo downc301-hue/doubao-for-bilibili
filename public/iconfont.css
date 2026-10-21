@@ -181,10 +181,6 @@
   content: "\e6d9";
 }
 
-.icon-x:before {
-  content: "\e6da";
-}
-
 .icon-help:before {
   content: "\e6dc";
 }
@@ -293,3 +289,8 @@
   content: "\e6aa";
 }
 
+
+
+.icon-close-btn:before {
+  content: "\e6da";
+}

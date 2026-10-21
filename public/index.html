@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>豆包 B站分身 · 控制台</title>
 <link rel="stylesheet" href="styles.css">
-<link rel="stylesheet" href="iconfont.css">
+<link rel="stylesheet" href="iconfont.css?v=0.4.6">
 <script>
 (function(){
   var t=localStorage.getItem('theme')||'dark';
@@ -83,7 +83,7 @@
     <div id="daily-actions" style="margin-top:10px;max-height:280px;overflow-y:auto;padding:8px 12px;background:#fafbfc;border:1px solid #eee;border-radius:8px"></div>
   </div>
   <div class="card">
-    <h2>👤 小号生态 <span id="bili-uname" style="font-size:12px;color:#888;margin-left:8px"></span></h2>
+    <h2><span class="iconfont icon-plus-follow" style="vertical-align:-2px;margin-right:4px"></span> 小号生态 <span id="bili-uname" style="font-size:12px;color:#888;margin-left:8px"></span></h2>
     <div id="bili-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:14px">
       <div class="mini-stat bili-green" data-role="following">
         <div class="mini-icon"><span class="iconfont icon-plus-follow" style=""></span></div>
@@ -101,7 +101,7 @@
         <div class="mini-label">累计被点赞</div>
       </div>
       <div class="mini-stat bili-blue" data-role="at">
-        <div class="mini-icon">📣</div>
+        <div class="mini-icon"><span class="iconfont icon-bell" style="font-size:18px"></span></div>
         <div class="mini-num" data-target="0">0</div>
         <div class="mini-label">未读 @ 你</div>
       </div>
@@ -111,7 +111,7 @@
         <div class="mini-label">未读 回复</div>
       </div>
       <div class="mini-stat bili-cyan" data-role="likeReply">
-        <div class="mini-icon">👍</div>
+        <div class="mini-icon"><span class="iconfont icon-thumb-up" style="font-size:18px"></span></div>
         <div class="mini-num" data-target="0">0</div>
         <div class="mini-label">回复被点赞</div>
       </div>
