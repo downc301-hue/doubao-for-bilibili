@@ -14,23 +14,31 @@
 | `E:\doubao\` | **开发目录 + Git 仓库** | IDE 在这里打开，改代码 / 测功能 / commit / push 到公开仓库 |
 | `D:\wwwroot\doubao-bot\` | **宝塔生产目录** | 宝塔面板运行的 Node 服务实际读取这里的代码 |
 
-### 1.1 同步流程（默认走 Git）
+### 1.1 AI 工程师提交流程（你只管开发目录）
+
+> **AI 工程师（Trae / Kimi / Cursor）**：你**只负责 E:\doubao**，生产部署是主人的事，别碰 D 盘。
 
 ```
-IDE 改 E:\doubao\xxx.mjs
+改 E:\doubao\xxx.mjs
         ↓
-  bump package.json 版本号（见 4.0）
+  bump package.json version（见 4.0，不 bump 不许 push）
         ↓
   git commit + git push origin main
         ↓
-  【主人在宝塔操作】git pull + PM2 重启
-        ↓
-  刷新页面看版本号 → 确认生效
+  收工，告诉主人"已推上去，请 git pull + 重启"
 ```
 
-### 1.2 紧急同步（Git pull 冲突时的备选方案）
+### 1.2 D 盘同步（主人的事，AI 不要主动做）
 
-当 D 盘生产目录有本地改动导致 `git pull` 失败时，AI 工程师可以用 robocopy 直接覆盖同步（**正常情况不要用，让主人自己 git pull**）：
+D 盘 `D:\wwwroot\doubao-bot\` 是宝塔生产目录，**AI 工程师禁止主动执行 robocopy 覆盖它**。以下命令仅供主人参考，或者主人明确要求时 AI 才执行：
+
+```powershell
+# 主人自己在宝塔里跑
+cd D:\wwwroot\doubao-bot
+git pull
+```
+
+**紧急情况（主人明确说 git pull 失败）**，AI 才可以用 robocopy 兜底覆盖同步：
 
 ```powershell
 robocopy "E:\doubao\src" "D:\wwwroot\doubao-bot\src" /E /NFL /NDL /NJH /NJS /nc /ns /np
