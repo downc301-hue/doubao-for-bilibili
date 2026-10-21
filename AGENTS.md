@@ -157,6 +157,32 @@ E:\doubao\
 
 ## 4. 开发规范
 
+### 4.0 版本号强制递增（每条 commit 都必须做）
+
+> **最高优先级**，不 bump 就不许 push。生产端靠这个判断代码是不是最新的。
+
+**规则**：
+- `package.json` 的 `version` 是**唯一真相源**
+- 每次修改代码 → 递增版本号，遵循语义化版本：
+  - **bug 修复** → `PATCH` +1（`0.2.0` → `0.2.1`）
+  - **新功能** → `MINOR` +1（`0.2.1` → `0.3.0`）
+  - **不兼容的架构变更** → `MAJOR` +1（`0.2.1` → `1.0.0`）
+- **一次 commit 只能有一个版本号 bump**（不要把版本号改动和功能改动混在同一个 commit 里；功能改完先 commit，bump 再单独 commit，或者同一个 commit 但 message 里写清楚 bump）
+
+**版本号链路**：
+```
+package.json version
+    ↓  src/web.mjs 里 JSON.parse 读出
+    ↓  GET /api/version 接口返回
+    ↓  前端 ver-badge span 动态显示
+    ↓  主人看到 v0.2.1 = 代码已到位
+    ↓  看到 v0.0.0 或旧版本 = Node 没重启 / D 盘没同步
+```
+
+**commit 前自查**：
+- [ ] `package.json` 里的 version 比上次 commit 的版本大
+- [ ] 已经在生产端通过 `/api/version` 确认生效
+
 ### 4.1 新增 B 站工具
 
 1. 在 `tools/commands/` 下新建 `.mjs`，**同时支持 CLI 入口和模块 export**
