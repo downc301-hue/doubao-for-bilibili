@@ -2,11 +2,46 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import https from 'node:https'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { getTasks, setTasks, getState, markDone, markFail, startScheduler, startFollowWatcher, stopFollowWatcher, getFollowStatus, getNextRun } from './scheduler.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+
+
+function doubaoHttps(payload, apiKey, endpointId) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ model: endpointId || '', max_tokens: 2000, ...payload })
+    const req = https.request({
+      hostname: 'ark.cn-beijing.volces.com',
+      path: '/api/v3/chat/completions',
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      },
+      family: 4,
+    }, (res) => {
+      const chunks = []
+      res.on('data', c => chunks.push(c))
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          resolve(j)
+        } catch (e) {
+          reject(new Error('JSON parse: ' + e.message))
+        }
+      })
+    })
+    req.on('error', reject)
+    req.setTimeout(10000, () => { req.destroy(new Error('timeout 10s')) })
+    req.write(body)
+    req.end()
+  })
+}
 
 function resolveDataDir() {
   const candidates = [
@@ -609,12 +644,7 @@ async function api(req, res, pathname) {
     const results = {}
     if (creds.doubaoApiKey) {
       try {
-        const r = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + creds.doubaoApiKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: creds.doubaoEndpointId || '', messages: [{ role: 'user', content: 'hi' }], max_tokens: 5 })
-        })
-        const j = await r.json()
+        const j = await doubaoHttps({ messages: [{ role: 'user', content: 'hi' }], max_tokens: 5 }, creds.doubaoApiKey, creds.doubaoEndpointId)
         results.doubao = { ok: !!j?.choices, message: j?.choices ? 'API key有效' : (j?.error?.message || JSON.stringify(j).slice(0, 80)) }
       } catch (e) {
         results.doubao = { ok: false, message: String(e.message) }
@@ -695,19 +725,10 @@ async function api(req, res, pathname) {
     const cfg = getJson('config.json')
     const prompt = buildDiaryPrompt(cfg, summary)
     try {
-      const r = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + creds.doubaoApiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: creds.doubaoEndpointId || '',
-          messages: [
+      const j = await doubaoHttps({ messages: [
             { role: 'system', content: `你是主人（${cfg.bili?.ownerName || ''}）的B站分身。主人让你根据今天的活动记录，写一篇结构化的日记总结。` },
             { role: 'user', content: prompt },
-          ],
-          max_tokens: 1500,
-        })
-      })
-      const j = await r.json()
+          ], max_tokens: 1500 }, creds.doubaoApiKey, creds.doubaoEndpointId)
       const text = j?.choices?.[0]?.message?.content || ''
       if (!text) return send(res, 500, JSON.stringify({ error: '豆包返回空', raw: JSON.stringify(j).slice(0, 200) }))
       const whaleDir = path.join(os.homedir(), '.dsh')
@@ -731,6 +752,99 @@ async function api(req, res, pathname) {
         i++
       }
       return send(res, 200, JSON.stringify({ ok: true, count: toWrite.length, note: text.slice(0, 200) }))
+    } catch (e) {
+      return send(res, 500, JSON.stringify({ error: String(e.message) }))
+    }
+  }
+  if (pathname === '/api/at-me' && req.method === 'GET') {
+    const H = biliReqHeaders()
+    if (!H) return send(res, 400, JSON.stringify({ error: '凭据缺失' }))
+    try {
+      const r = await fetch('https://api.bilibili.com/x/msgfeed/at?build=0&mobi_app=web', { headers: H })
+      const j = await r.json()
+      if (j.code !== 0) return send(res, 500, JSON.stringify({ error: `at-me code=${j.code} ${j.message}` }))
+      const cfg = getJson('config.json')
+      const ownerMid = String(cfg.bili?.ownerMid || '')
+      const myMid = String(cfg.bili?.selfMid || '')
+      const processed = loadAtProcessed()
+      const rawItems = (j.data?.items || [])
+      const checked = await Promise.all(rawItems.map(async x => {
+        const isOwner = String(x.user?.mid) === ownerMid
+        const id = String(x.id)
+        let replied = processed.has(id)
+        if (!replied && isOwner && myMid) {
+          replied = await checkAlreadyReplied(H, x.item?.subject_id, x.item?.root_id, x.item?.source_id, myMid)
+          if (replied) saveAtProcessed(id)
+        }
+        return {
+          id,
+          at_time: x.at_time,
+          nickname: x.user?.nickname || '',
+          mid: String(x.user?.mid || ''),
+          content: x.item?.source_content || '',
+          bvid: extractBv(x.item?.uri || ''),
+          aid: x.item?.subject_id || '',
+          root_id: x.item?.root_id || 0,
+          source_id: x.item?.source_id || '',
+          is_owner: isOwner,
+          processed: replied,
+        }
+      }))
+      const ownerItems = checked.filter(x => x.is_owner && !x.processed)
+      return send(res, 200, JSON.stringify({ total: checked.length, owner_unprocessed: ownerItems.length, items: ownerItems }))
+    } catch (e) {
+      return send(res, 500, JSON.stringify({ error: String(e.message) }))
+    }
+  }
+  if (pathname === '/api/reply-at' && req.method === 'POST') {
+    const body = await parseBody(req)
+    const atId = body.id
+    if (!atId) return send(res, 400, JSON.stringify({ error: '缺少 id' }))
+    const H = biliReqHeaders()
+    if (!H) return send(res, 400, JSON.stringify({ error: '凭据缺失' }))
+    const processed = loadAtProcessed()
+    if (processed.has(String(atId))) {
+      return send(res, 400, JSON.stringify({ error: '已经回复过这条 @ 了，不再重复' }))
+    }
+    const cfg = getJson('config.json')
+    const ownerMid = String(cfg.bili?.ownerMid || '')
+    const myMid = String(cfg.bili?.selfMid || '')
+    const creds = getJson('credentials.json')
+    if (!creds.doubaoApiKey) return send(res, 400, JSON.stringify({ error: '未配置豆包 API Key' }))
+    try {
+      const r = await fetch('https://api.bilibili.com/x/msgfeed/at?build=0&mobi_app=web', { headers: H })
+      const j = await r.json()
+      const atItem = (j.data?.items || []).find(x => String(x.id) === String(atId))
+      if (!atItem) return send(res, 404, JSON.stringify({ error: '找不到这条 @' }))
+      if (String(atItem.user?.mid) !== ownerMid) return send(res, 400, JSON.stringify({ error: '不是主人艾特的，按规矩不回' }))
+      const aid = atItem.item?.subject_id
+      const sourceId = atItem.item?.source_id
+      const root = sourceId
+      const parent = sourceId
+      if (myMid && await checkAlreadyReplied(H, aid, root, parent, myMid)) {
+        saveAtProcessed(String(atId))
+        return send(res, 400, JSON.stringify({ error: '评论区已存在我的回复，跳过' }))
+      }
+      const bvid = extractBv(atItem.item?.uri || '')
+      if (!bvid) return send(res, 400, JSON.stringify({ error: '无法从 URI 解析 BV' }))
+      const content = atItem.item?.source_content || ''
+      const nickname = atItem.user?.nickname || cfg.bili?.ownerName || '主人'
+      const replyText = await generateAtReply(creds, cfg, nickname, content, bvid)
+      if (!replyText) return send(res, 500, JSON.stringify({ error: '豆包生成空回复' }))
+      const commentScript = path.join(path.resolve(__dirname, '..'), 'tools', 'commands', 'comment.mjs')
+      const args = ['--oid', String(aid), '--bvid', bvid, '--message', replyText, '--root', String(root), '--parent', String(parent), '--go']
+      const child = spawn('node', [commentScript, ...args], { env: spawnEnv() })
+      let out = '', err = ''
+      child.stdout.on('data', b => out += b.toString())
+      child.stderr.on('data', b => err += b.toString())
+      const code = await new Promise(resolve => child.on('close', resolve))
+      if (code !== 0) {
+        return send(res, 500, JSON.stringify({ error: `评论发送失败(code=${code}): ${err.trim() || out.trim()}` }))
+      }
+      saveAtProcessed(String(atId))
+      const whalePath = path.join(os.homedir(), '.dsh', 'whale-log.jsonl')
+      fs.appendFileSync(whalePath, JSON.stringify({ at: new Date().toISOString(), kind: 'comment', note: `回复主人 @：${content.slice(0, 60)} → ${replyText.slice(0, 80)}`, target: bvid }) + '\n')
+      return send(res, 200, JSON.stringify({ ok: true, message: replyText, comment_result: out.trim().slice(0, 300) }))
     } catch (e) {
       return send(res, 500, JSON.stringify({ error: String(e.message) }))
     }
@@ -854,6 +968,71 @@ async function biliModifyRelation(res, fid, act) {
 function extractCookie(cookieStr, name) {
   const m = cookieStr.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'))
   return m ? decodeURIComponent(m[1]) : null
+}
+
+function extractBv(uri) {
+  if (!uri) return ''
+  const m = String(uri).match(/BV[0-9A-Za-z]+/)
+  return m ? m[0] : ''
+}
+
+const AT_PROCESSED_FILE = path.join(os.homedir(), '.doubao-bot', 'at-processed.json')
+
+function loadAtProcessed() {
+  try {
+    const raw = fs.readFileSync(AT_PROCESSED_FILE, 'utf8')
+    const arr = JSON.parse(raw)
+    return new Set(Array.isArray(arr) ? arr : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function saveAtProcessed(id) {
+  try {
+    const s = loadAtProcessed()
+    s.add(String(id))
+    fs.mkdirSync(path.dirname(AT_PROCESSED_FILE), { recursive: true })
+    fs.writeFileSync(AT_PROCESSED_FILE, JSON.stringify(Array.from(s), null, 2))
+  } catch {}
+}
+
+async function checkAlreadyReplied(H, aid, rootId, sourceId, myMid) {
+  if (!aid || !myMid) return false
+  try {
+    const root = sourceId && Number(sourceId) > 0 ? Number(sourceId)
+               : rootId && Number(rootId) > 0 ? Number(rootId)
+               : Number(aid)
+    const r = await fetch(`https://api.bilibili.com/x/v2/reply/reply?type=1&oid=${aid}&root=${root}`, { headers: H })
+    const j = await r.json()
+    if (j.code !== 0) return false
+    const replies = j.data?.replies || []
+    return replies.some(c => String(c.member?.mid) === String(myMid))
+  } catch {
+    return false
+  }
+}
+
+async function generateAtReply(creds, cfg, nickname, content, bvid) {
+  const ownerName = cfg.bili?.ownerName || '主人'
+  const sys = `你是${ownerName}的B站分身，现在主人在B站@了你，说了：「${content}」。请你用主人分身的身份，写一句简短、自然、贴合语境的回复。要求：15-50字，口语化，像真人在B站评论区的回复，可以带emoji但不要太多，不要开头加"主人好"之类的称呼。直接输出回复文本，不要任何其他内容。`
+  try {
+    const j = await doubaoHttps({ messages: [
+          { role: 'system', content: sys },
+        ], max_tokens: 200 }, creds.doubaoApiKey, creds.doubaoEndpointId)
+    const text = (j?.choices?.[0]?.message?.content || '').trim()
+    if (text) return text.replace(/^["「『]|["」』]$/g, '').trim()
+  } catch (e) {
+    console.log('[doubao]', e?.message || e)
+  }
+  const fallbacks = [
+    '收到收到！这条我记下啦～',
+    '哈哈懂你意思了，稍后看一下～',
+    '好的好的，让我看看这条内容~',
+    '嗯嗯，我回头去看看！',
+    'Get到了，马上安排～',
+  ]
+  return fallbacks[Math.floor(Math.random() * fallbacks.length)]
 }
 
 function runDaily(req, res) {
