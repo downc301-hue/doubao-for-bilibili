@@ -101,13 +101,27 @@ function findFile(candidates) {
 }
 
 function toBeijingDate(isoStr) {
-  try { return new Date(isoStr).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }) } catch { return '' }
+  try {
+    const d = new Date(isoStr)
+    const utcDay = new Date(d.getTime() + 8 * 3600 * 1000)
+    return utcDay.toISOString().slice(0, 10)
+  } catch { return '' }
 }
 function toBeijingTime(isoStr) {
-  try { return new Date(isoStr).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }).slice(0, 8) } catch { return '' }
+  try {
+    const d = new Date(isoStr)
+    const hh = String((d.getUTCHours() + 8) % 24).padStart(2, '0')
+    const mm = String(d.getUTCMinutes()).padStart(2, '0')
+    const ss = String(d.getUTCSeconds()).padStart(2, '0')
+    return `${hh}:${mm}:${ss}`
+  } catch { return '' }
 }
 function toBeijingFull(isoStr) {
-  try { return new Date(isoStr).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }).replace(/\//g, '-') } catch { return '' }
+  try {
+    const d = new Date(isoStr)
+    const utcDay = new Date(d.getTime() + 8 * 3600 * 1000)
+    return utcDay.toISOString().replace('T', ' ').slice(0, 19)
+  } catch { return '' }
 }
 
 function readWhaleLog() {
