@@ -74,6 +74,14 @@
     <h2 id="latest-diary-title">最新日记</h2>
     <div id="latest-diary-body"></div>
   </div>
+  <div class="card">
+    <h2>🐋 主人的艾特 <span id="at-me-badge" class="tag offline">加载中</span></h2>
+    <p class="mini">好钢用在刀刃上——只回复主人的艾特，其他人的一律不回。点击"一键回复"让豆包生成合适的评论并自动发出。</p>
+    <div class="row" style="margin-top:8px">
+      <button class="btn ghost" onclick="loadAtMe()">🔄 刷新艾特</button>
+    </div>
+    <div id="at-me-list" style="margin-top:12px">正在拉取主人的 @ 列表...</div>
+  </div>
 </div>
 
 <div class="pane" id="pane-run">

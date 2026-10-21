@@ -104,7 +104,10 @@ function toBeijingDate(isoStr) {
   try { return new Date(isoStr).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }) } catch { return '' }
 }
 function toBeijingTime(isoStr) {
-  try { return new Date(isoStr).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }).slice(0, 5) } catch { return '' }
+  try { return new Date(isoStr).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }).slice(0, 8) } catch { return '' }
+}
+function toBeijingFull(isoStr) {
+  try { return new Date(isoStr).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }).replace(/\//g, '-') } catch { return '' }
 }
 
 function readWhaleLog() {
@@ -724,21 +727,22 @@ async function api(req, res, pathname) {
     let runs = []
     let tools = []
     let agentStatus = null
+    const bj = (iso) => toBeijingTime(iso)
     try {
       const agent = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'agent-state.json'), 'utf8'))
       agentStatus = agent
       if (agent) {
-        if (agent.status === 'running') runs.push({ event: 'start', time: agent.startAt })
+        if (agent.status === 'running') runs.push({ event: 'start', time: bj(agent.startAt), _raw: agent.startAt })
         else if (agent.status === 'done') {
-          runs.push({ event: 'start', time: agent.startAt })
-          runs.push({ event: 'done', time: agent.endAt, usage: agent.tokens || {} })
+          runs.push({ event: 'start', time: bj(agent.startAt), _raw: agent.startAt })
+          runs.push({ event: 'done', time: bj(agent.endAt), _raw: agent.endAt, usage: agent.tokens || {} })
         } else if (agent.status === 'aborted') {
-          runs.push({ event: 'start', time: agent.startAt })
-          runs.push({ event: 'aborted', time: agent.endAt || agent.startAt, reason: agent.reason })
+          runs.push({ event: 'start', time: bj(agent.startAt), _raw: agent.startAt })
+          runs.push({ event: 'aborted', time: bj(agent.endAt || agent.startAt), _raw: agent.endAt || agent.startAt, reason: agent.reason })
         } else if (agent.status === 'forced') {
-          runs.push({ event: 'forced', time: agent.endAt || agent.startAt, reason: agent.reason })
+          runs.push({ event: 'forced', time: bj(agent.endAt || agent.startAt), _raw: agent.endAt || agent.startAt, reason: agent.reason })
         } else {
-          runs.push({ event: agent.status, time: agent.startAt })
+          runs.push({ event: agent.status, time: bj(agent.startAt), _raw: agent.startAt })
         }
       }
     } catch {}
@@ -746,20 +750,25 @@ async function api(req, res, pathname) {
     for (const e of whaleLogs) {
       if (e.kind === 'tool_call' || e.kind === 'action') {
         tools.push({
-          time: e.at,
+          time: bj(e.at),
+          _raw: e.at,
           status: e.success ? 'ok' : (e.success === false ? 'fail' : 'ok'),
           label: e.note || e.tool || e.target || '',
           resultSize: e.note ? String(e.note).length : 0,
           durationMs: e.durationMs || 0,
         })
       } else if (e.kind === 'thought' || e.kind === 'event' || e.kind === 'summary') {
-        if (e.at) runs.push({ event: e.kind || 'thought', time: e.at, content: String(e.event || e.note || e.summary || '').slice(0, 80) })
+        if (e.at) runs.push({ event: e.kind || 'thought', time: bj(e.at), _raw: e.at, content: String(e.event || e.note || e.summary || '').slice(0, 80) })
       }
     }
-    runs = runs.sort((a, b) => new Date(a.time) - new Date(b.time))
-    tools = tools.sort((a, b) => new Date(a.time) - new Date(b.time))
+    runs = runs.sort((a, b) => new Date(a._raw || a.time) - new Date(b._raw || b.time))
+    tools = tools.sort((a, b) => new Date(a._raw || a.time) - new Date(b._raw || b.time))
 
     const currentStatus = computeCurrentStatus(agentStatus, whaleLogs)
+    if (currentStatus.lastAt) currentStatus.lastAt = bj(currentStatus.lastAt)
+
+    for (const r of runs) delete r._raw
+    for (const t of tools) delete t._raw
 
     return send(res, 200, JSON.stringify({ runs, tools, currentStatus }))
   }
