@@ -143,6 +143,7 @@ async function loadConfig(){
     var fwEl=document.getElementById('fw-enabled');if(fwEl)fwEl.checked=!!fw.enabled;
     fwEl=document.getElementById('fw-interval');if(fwEl)fwEl.value=fw.interval||300;
     fwEl=document.getElementById('fw-ol');if(fwEl)fwEl.checked=!!fw.onlyWhitelist;
+    fwEl=document.getElementById('fw-nc');if(fwEl)fwEl.checked=!!fw.noComment;
     fwEl=document.getElementById('fw-wl');if(fwEl)fwEl.value=(fw.whitelist||[]).join(', ');
     fwEl=document.getElementById('fw-bl');if(fwEl)fwEl.value=(fw.blacklist||[]).join(', ');
     fwEl=document.getElementById('fw-templates');if(fwEl)fwEl.value=(fw.templates||[]).join('\n');
@@ -232,6 +233,7 @@ var btnSaveFW=document.getElementById('btn-save-fw');if(btnSaveFW)btnSaveFW.oncl
     enabled:document.getElementById('fw-enabled').checked,
     interval:document.getElementById('fw-interval').value,
     onlyWhitelist:document.getElementById('fw-ol').checked,
+    noComment:document.getElementById('fw-nc').checked,
     whitelist:document.getElementById('fw-wl').value,
     blacklist:document.getElementById('fw-bl').value,
     templates:document.getElementById('fw-templates').value,

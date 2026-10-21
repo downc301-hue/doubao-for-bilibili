@@ -1,0 +1,2 @@
+raw: {"choices":[{"finish_reason":"stop","index":0,"logprobs":null,"message":{"content":"欢迎呀🐳 那以后我就在这儿跟着鲸鱼娘混啦，B站评论区随时待命！","role":"assistant"}}],"created":1792539318,"id":"021792539317286add9fca5277b8939d33af9a0f1789d6ce1b859","model":"doubao-seed-2-1-lite-260915","service_tier":"default","object":"chat.completion","usage":{"completion_tokens":22,"prompt_tokens":137,"total_tokens":159,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":0}}}
+REPLY: 欢迎呀🐳 那以后我就在这儿跟着鲸鱼娘混啦，B站评论区随时待命！

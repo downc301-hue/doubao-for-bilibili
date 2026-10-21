@@ -95,6 +95,33 @@ function writeJson(p, obj) {
   } catch {}
 }
 
+let whaleLogPath = null
+function getWhaleLogPath() {
+  if (whaleLogPath) return whaleLogPath
+  const candidates = [
+    path.join(REAL_USER_HOMEDIR, '.dsh', 'whale-log.jsonl'),
+    path.join(os.homedir(), '.dsh', 'whale-log.jsonl'),
+    'C:\\Users\\Administrator\\.dsh\\whale-log.jsonl',
+    '/root/.dsh/whale-log.jsonl',
+  ]
+  for (const p of candidates) {
+    try {
+      fs.mkdirSync(path.dirname(p), { recursive: true })
+      whaleLogPath = p
+      return p
+    } catch {}
+  }
+  whaleLogPath = candidates[0]
+  return whaleLogPath
+}
+function writeWhaleLog(entry) {
+  try {
+    const p = getWhaleLogPath()
+    const line = JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n'
+    fs.appendFileSync(p, line)
+  } catch {}
+}
+
 const processed = new Set(readJson(PROCESSED_FILE, []))
 const config = readJson(CONFIG_FILE, {})
 const whitelist = new Set((config.whitelist || []).map(String))
@@ -220,6 +247,15 @@ async function runArchiveActions(video) {
   const rShare = await runTool('share')
   console.log(`   ${rShare.out.includes('成功') || rShare.out.includes('已') ? '[OK]' : rShare.out.includes('重复') ? '[SKIP]' : '[FAIL]'} share`)
 
+  const allOk = rLike.out.includes('成功') && rShare.out.includes('成功')
+  writeWhaleLog({
+    kind: 'tool_call',
+    tool: 'archive',
+    note: `三连 ${video.upName || ''} ${video.title || ''}`.slice(0, 80),
+    target: video.bvid || video.articleId || '',
+    success: allOk,
+  })
+
   await new Promise(s => setTimeout(s, 1500))
 }
 
@@ -248,6 +284,13 @@ async function runDanmu(video) {
     proc.stdout.on("data", d => process.stdout.write("   > " + d.toString()))
     proc.stderr.on("data", d => process.stderr.write("   > ERR " + d.toString()))
     await new Promise(res => proc.on("close", res))
+    writeWhaleLog({
+      kind: 'tool_call',
+      tool: 'danmu',
+      note: `弹幕 "${msg}" → ${video.upName || ''}`.slice(0, 80),
+      target: video.bvid,
+      success: true,
+    })
   } catch (e) {
     console.log("   [danmu] err:", e.message)
   }
@@ -348,6 +391,12 @@ async function runIdleActivity() {
   await runArchiveActions(pick)
   await runDanmu(pick)
   await new Promise(s => setTimeout(s, 2000 + Math.random() * 3000))
+  writeWhaleLog({
+    kind: 'thought',
+    event: 'idle-round',
+    note: `空闲补位 #${idleCount} 热门互动完成 ${pick.upName || ''} ${pick.title || ''}`.slice(0, 80),
+    target: pick.bvid,
+  })
 }
 
 function pickCommentMsg(title) {
@@ -450,6 +499,12 @@ for (;;) {
           : `   BV=${v.bvid} aid=${v.aid} play=${v.play} pub=${v.pubTs ? new Date(v.pubTs * 1000).toLocaleString('zh-CN', { hour12: false }) : '?'}`
         console.log(`\n[NEW]${srcTag}${ownerTag} ${v.upName} | ${v.title.slice(0, 60)}`)
         console.log(idLine)
+        writeWhaleLog({
+          kind: 'thought',
+          event: isOwner ? 'owner-update' : 'follow-update',
+          note: `发现${isOwner ? '主人' : '关注'}更新 ${v.upName} ${v.title || ''}`.slice(0, 80),
+          target: v.type === 'article' ? `cv${v.articleId}` : v.bvid,
+        })
 
         await runArchiveActions(v)
         await runDanmu(v)
@@ -460,8 +515,15 @@ for (;;) {
         } else {
           console.log(`   comment(${source}): ${msg}`)
           const out = await runCommentTask(msg, v)
-          if (out.includes('发送成功')) console.log(`   [OK] 已抢占前排`)
+          const ok = out.includes('发送成功')
+          if (ok) console.log(`   [OK] 已抢占前排`)
           else console.log(`   [WARN] 评论可能失败，检查日志`)
+          writeWhaleLog({
+            kind: 'comment',
+            note: `评论(${source}) "${msg.slice(0, 30)}" → ${v.upName || ''}`.slice(0, 80),
+            target: v.type === 'article' ? `cv${v.articleId}` : v.bvid,
+            success: ok,
+          })
         }
 
         await new Promise(s => setTimeout(s, 2000 + Math.random() * 3000))
