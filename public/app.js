@@ -75,10 +75,8 @@ async function renderDashboard(){
   doubaoSt.classList.add(d.creds?.doubaoApiKey?'ok':'err');
   doubaoSt.querySelector('.value').textContent=d.creds?.doubaoApiKey?'已配置':'未配置';
 
-  var biliSt=document.getElementById('stat-bili');
-  biliSt.classList.remove('ok','err');
-  biliSt.classList.add(d.creds?.sessdata?'ok':'err');
-  biliSt.querySelector('.value').textContent=d.creds?.sessdata?'Cookie OK':'请登录';
+  var biliSt=document.getElementById('stat-bili-api');
+  if(biliSt){biliSt.classList.remove('ok','err');biliSt.classList.add(d.creds?.sessdata?'ok':'err');biliSt.querySelector('.value').textContent=d.creds?.sessdata?'Cookie OK':'请登录'}
 
   var userSt=document.getElementById('stat-user');
   userSt.classList.remove('ok','err');
@@ -703,3 +701,81 @@ async function replyAtEvent(id){
     btn.disabled=false;btn.textContent='✨ 一键回复';
   }
 }
+
+function animateNumber(el, target, duration) {
+  duration = duration || 1000;
+  var start = parseInt(el.textContent) || 0;
+  var startTime = null;
+  function step(ts) {
+    if (!startTime) startTime = ts;
+    var progress = Math.min((ts - startTime) / duration, 1);
+    var ease = 1 - Math.pow(1 - progress, 3);
+    var current = Math.round(start + (target - start) * ease);
+    el.textContent = current.toLocaleString();
+    if (progress < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+function loadDailyReport() {
+  fetch('/api/daily-report').then(function(r){return r.json()}).then(function(d){
+    var dateEl = document.getElementById('daily-date');
+    if (dateEl) dateEl.textContent = '· ' + (d.date || '');
+    var roles = ['archives','danmus','comments','interactions'];
+    var maxMap = { archives: 30, danmus: 30, comments: 10, interactions: 60 };
+    roles.forEach(function(role){
+      var card = document.querySelector('.mini-stat[data-role="'+role+'"]');
+      if (!card) return;
+      var numEl = card.querySelector('.mini-num');
+      var barEl = card.querySelector('.mini-bar > div');
+      animateNumber(numEl, d[role] || 0, 1200);
+      if (barEl) {
+        var pct = Math.min((d[role] || 0) / (maxMap[role] || 1), 1) * 100;
+        setTimeout(function(){ barEl.style.width = pct + '%'; }, 100);
+      }
+    });
+    var planText = document.getElementById('plan-text');
+    if (planText) {
+      var archives = d.archives || 0, danmus = d.danmus || 0, comments = d.comments || 0;
+      var archiveOk = archives >= 30, danmuOk = danmus >= 30, commentOk = comments >= 5;
+      var parts = [];
+      parts.push('<span style="color:'+ (archiveOk ? '#52c41a' : '#faad14') +'">🔁 三连 '+archives+'/30</span>');
+      parts.push('<span style="color:'+ (danmuOk ? '#52c41a' : '#faad14') +'">💬 弹幕 '+danmus+'/30</span>');
+      var cfg = null;
+      try { cfg = document.getElementById('fw-nc') } catch {}
+      var noComment = cfg ? cfg.checked : false;
+      if (noComment) {
+        parts.push('<span style="color:#888">📝 评论（养号模式已关）</span>');
+      } else {
+        parts.push('<span style="color:'+ (commentOk ? '#52c41a' : '#faad14') +'">📝 评论 '+comments+'/5</span>');
+      }
+      planText.innerHTML = parts.join(' &nbsp;·&nbsp; ') + '<span style="color:#888;margin-left:12px">· 每 3 轮 idle 自动触发热门互动</span>';
+    }
+  }).catch(function(){});
+}
+
+function loadBiliStats() {
+  fetch('/api/bili-stats').then(function(r){return r.json()}).then(function(d){
+    var unameEl = document.getElementById('bili-uname');
+    if (unameEl && d.ok) unameEl.textContent = d.uname ? '· '+d.uname+' (UID '+d.mid+')' : '';
+    var statMap = {
+      following: d.stat?.following || 0,
+      follower: d.stat?.follower || 0,
+      likes: d.stat?.likes || 0,
+      at: d.unread?.at || 0,
+      reply: d.unread?.reply || 0,
+      likeReply: d.unread?.likeReply || 0,
+    };
+    Object.keys(statMap).forEach(function(role){
+      var card = document.querySelector('.mini-stat[data-role="'+role+'"]');
+      if (!card) return;
+      var numEl = card.querySelector('.mini-num');
+      animateNumber(numEl, statMap[role], 1000);
+    });
+  }).catch(function(){});
+}
+
+loadDailyReport();
+loadBiliStats();
+setInterval(loadDailyReport, 60000);
+setInterval(loadBiliStats, 120000);

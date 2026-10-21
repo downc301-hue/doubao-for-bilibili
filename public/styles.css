@@ -131,3 +131,17 @@ a{color:var(--c-accent)}
 .theme-bar button.active{background:#fff;color:var(--c-accent);border-color:#fff}
 html[data-theme="light"] header .theme-bar button{background:rgba(255,255,255,.25);border-color:rgba(255,255,255,.5)}
 html[data-theme="light"] header .theme-bar button.active{background:#fff;color:var(--c-accent);border-color:#fff}
+.mini-stat{background:linear-gradient(135deg,#fafbfc 0%,#f0f2f5 100%);border-radius:12px;padding:16px;text-align:center;position:relative;overflow:hidden;transition:transform .2s,box-shadow .2s;border:1px solid #eee}
+.mini-stat:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(0,0,0,.08)}
+.mini-stat .mini-icon{font-size:24px;margin-bottom:4px}
+.mini-stat .mini-num{font-size:28px;font-weight:700;font-family:'SF Mono','Menlo',monospace;color:#1a1a2e;line-height:1.2}
+.mini-stat .mini-label{font-size:11px;color:#888;margin-top:4px}
+.mini-stat .mini-bar{height:4px;background:#eee;border-radius:2px;margin-top:8px;overflow:hidden}
+.mini-stat .mini-bar>div{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:2px;width:0;transition:width 1s ease-out}
+.mini-stat .mini-bar.total>div{background:linear-gradient(90deg,#10b981,#3b82f6)}
+.mini-stat.bili-green .mini-num{color:#52c41a}
+.mini-stat.bili-pink .mini-num{color:#eb2f96}
+.mini-stat.bili-yellow .mini-num{color:#faad14}
+.mini-stat.bili-blue .mini-num{color:#1890ff}
+.mini-stat.bili-purple .mini-num{color:#722ed1}
+.mini-stat.bili-cyan .mini-num{color:#13c2c2}

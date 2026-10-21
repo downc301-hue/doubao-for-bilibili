@@ -798,6 +798,62 @@ async function api(req, res, pathname) {
 
     return send(res, 200, JSON.stringify({ runs, tools, currentStatus }))
   }
+  if (pathname === '/api/daily-report' && req.method === 'GET') {
+    const whaleLogs = readWhaleLog()
+    const today = bjDate(new Date().toISOString())
+    const todayLogs = whaleLogs.filter(e => bjDate(e.at) === today)
+    let archives = 0, danmus = 0, comments = 0, likes = 0, favs = 0, shares = 0
+    for (const e of todayLogs) {
+      if (e.kind === 'tool_call') {
+        if (e.tool === 'archive') archives++
+        if (e.tool === 'danmu') danmus++
+        if (e.tool === 'like') likes++
+        if (e.tool === 'fav') favs++
+        if (e.tool === 'share') shares++
+      } else if (e.kind === 'comment') {
+        comments++
+      }
+    }
+    return send(res, 200, JSON.stringify({
+      date: today,
+      archives, danmus, comments, likes, favs, shares,
+      interactions: archives + danmus + comments,
+      totalLogs: todayLogs.length,
+    }))
+  }
+  if (pathname === '/api/bili-stats' && req.method === 'GET') {
+    const cfg = getJson('credentials.json')
+    if (!cfg.biliCookieSet) return send(res, 200, JSON.stringify({ ok: false, error: 'Cookie 未配置' }))
+    const H = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Referer': 'https://www.bilibili.com/',
+      'Cookie': cfg.biliCookie || '',
+    }
+    let nav = null, atCount = 0, replyCount = 0, likeReplyCount = 0
+    try {
+      const r = await fetch('https://api.bilibili.com/x/web-interface/nav', { headers: H })
+      const j = await r.json()
+      if (j?.code === 0) nav = j.data
+    } catch {}
+    try {
+      const r = await fetch('https://api.bilibili.com/x/msgfeed/unread?build=0&mobi_app=web', { headers: H })
+      const j = await r.json()
+      if (j?.code === 0) {
+        atCount = j.data?.at ?? 0
+        replyCount = j.data?.reply ?? 0
+        likeReplyCount = j.data?.liked_reply ?? 0
+      }
+    } catch {}
+    return send(res, 200, JSON.stringify({
+      ok: !!nav,
+      mid: nav?.mid,
+      uname: nav?.uname,
+      stat: nav?.stat || { following: 0, follower: 0, likes: 0 },
+      vipStatus: nav?.vipStatus,
+      levelInfo: nav?.level_info,
+      unread: { at: atCount, reply: replyCount, likeReply: likeReplyCount },
+    }))
+  }
   if (pathname === '/api/bili/unfollow' && req.method === 'POST') {
     const body = await parseBody(req)
     const mid = Number(body.mid)

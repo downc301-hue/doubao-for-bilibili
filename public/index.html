@@ -49,7 +49,74 @@
 
 <div class="pane active" id="pane-overview">
   <div class="card">
-    <h2>快速状态</h2>
+    <h2>🎯 今日养号进度 <span id="daily-date" style="font-size:12px;color:#888;margin-left:8px"></span></h2>
+    <div id="daily-report" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:14px;margin-top:14px">
+      <div class="mini-stat" data-role="archives">
+        <div class="mini-icon">🔁</div>
+        <div class="mini-num" data-target="0">0</div>
+        <div class="mini-label">三连（喜欢+收藏+分享）</div>
+        <div class="mini-bar"><div></div></div>
+      </div>
+      <div class="mini-stat" data-role="danmus">
+        <div class="mini-icon">💬</div>
+        <div class="mini-num" data-target="0">0</div>
+        <div class="mini-label">弹幕</div>
+        <div class="mini-bar"><div></div></div>
+      </div>
+      <div class="mini-stat" data-role="comments">
+        <div class="mini-icon">📝</div>
+        <div class="mini-num" data-target="0">0</div>
+        <div class="mini-label">评论</div>
+        <div class="mini-bar"><div></div></div>
+      </div>
+      <div class="mini-stat" data-role="interactions">
+        <div class="mini-icon">🎯</div>
+        <div class="mini-num" data-target="0">0</div>
+        <div class="mini-label">今日互动总计</div>
+        <div class="mini-bar total"><div></div></div>
+      </div>
+    </div>
+    <div style="margin-top:14px;padding:10px 12px;background:#f6f8fa;border-radius:8px;font-size:13px;color:#555" id="daily-plan">
+      <span id="plan-text">加载中...</span>
+    </div>
+  </div>
+  <div class="card">
+    <h2>👤 小号生态 <span id="bili-uname" style="font-size:12px;color:#888;margin-left:8px"></span></h2>
+    <div id="bili-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:14px">
+      <div class="mini-stat bili-green" data-role="following">
+        <div class="mini-icon">➕</div>
+        <div class="mini-num" data-target="0">0</div>
+        <div class="mini-label">关注（带的人）</div>
+      </div>
+      <div class="mini-stat bili-pink" data-role="follower">
+        <div class="mini-icon">👥</div>
+        <div class="mini-num" data-target="0">0</div>
+        <div class="mini-label">粉丝（带小号的人）</div>
+      </div>
+      <div class="mini-stat bili-yellow" data-role="likes">
+        <div class="mini-icon">❤️</div>
+        <div class="mini-num" data-target="0">0</div>
+        <div class="mini-label">累计被点赞</div>
+      </div>
+      <div class="mini-stat bili-blue" data-role="at">
+        <div class="mini-icon">📣</div>
+        <div class="mini-num" data-target="0">0</div>
+        <div class="mini-label">未读 @ 你</div>
+      </div>
+      <div class="mini-stat bili-purple" data-role="reply">
+        <div class="mini-icon">💭</div>
+        <div class="mini-num" data-target="0">0</div>
+        <div class="mini-label">未读 回复</div>
+      </div>
+      <div class="mini-stat bili-cyan" data-role="likeReply">
+        <div class="mini-icon">👍</div>
+        <div class="mini-num" data-target="0">0</div>
+        <div class="mini-label">回复被点赞</div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>系统状态</h2>
     <div class="grid">
       <div class="stat clickable" id="stat-tokens" onclick="showTokenChart()" title="点击查看消耗趋势">
         <div class="label">今日 Token / 预算 <span class="hint-link">📈</span></div>
@@ -60,12 +127,12 @@
         <div class="label">豆包 API</div>
         <div class="value" id="stat-doubao-value">加载中...</div>
       </div>
-      <div class="stat" id="stat-bili">
-        <div class="label">B站小号</div>
-        <div class="value" id="stat-bili-value">加载中...</div>
+      <div class="stat" id="stat-bili-api">
+        <div class="label">B站接口</div>
+        <div class="value" id="stat-bili-api-value">加载中...</div>
       </div>
       <div class="stat" id="stat-user">
-        <div class="label">用户</div>
+        <div class="label">主人</div>
         <div class="value" id="stat-user-value">加载中...</div>
       </div>
     </div>
