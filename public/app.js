@@ -1,4 +1,8 @@
 (function(){
+  // BV 号自动变蓝链（evt-note / evt-target 里的 BV1xxx → 可点击 a 标签）
+  window.bvLink=function(text){
+    return String(text||'').replace(/\b(BV[0-9A-Za-z]{10})\b/g,'<a href="https://www.bilibili.com/video/$1" target="_blank" rel="noopener" style="color:#1890ff;text-decoration:none;font-weight:600" onclick="event.stopPropagation()">$1</a>');
+  };
   function setFS(s){
     var m={sm:'15',md:'19',lg:'24'};
     var p=m[s]||'19';
@@ -162,9 +166,10 @@ async function renderDashboard(){
     card.style.display='block';
     document.getElementById('latest-diary-title').textContent='最新日记 · '+(d.latestDiary.date||'');
     var body=document.getElementById('latest-diary-body');
-    var html='<div class="diary-event evt-thought" style="cursor:pointer" onclick="this.classList.toggle(\'expanded\')"><div class="evt-body"><div class="evt-note">'+(d.latestDiary.summary||'...')+'</div></div></div>';
+    // BV 号自动变蓝链（bvLink 定义在文件顶部）
+    var html='<div class="diary-event evt-thought" style="cursor:pointer" onclick="this.classList.toggle(\'expanded\')"><div class="evt-body"><div class="evt-note">'+bvLink(d.latestDiary.summary||'...')+'</div></div></div>';
     (d.latestDiary.events||[]).forEach(function(ev){
-      html+='<div class="diary-event evt-'+(ev.kind||'event')+'" style="cursor:pointer" onclick="this.classList.toggle(\'expanded\')"><div class="evt-body"><div class="evt-head"><span class="evt-time">'+(ev.time||'')+'</span>'+(ev.target?'<span class="evt-target">'+ev.target+'</span>':'')+'</div><div class="evt-note">'+(ev.note||'')+'</div></div></div>';
+      html+='<div class="diary-event evt-'+(ev.kind||'event')+'" style="cursor:pointer" onclick="this.classList.toggle(\'expanded\')"><div class="evt-body"><div class="evt-head"><span class="evt-time">'+(ev.time||'')+'</span>'+(ev.target?'<span class="evt-target">'+bvLink(ev.target)+'</span>':'')+'</div><div class="evt-note">'+bvLink(ev.note||'')+'</div></div></div>';
     });
     body.innerHTML=html;
   }
@@ -383,9 +388,9 @@ async function loadDiary(){
         '<div class="evt-body">'+
           '<div class="evt-head">'+
             '<span class="evt-time">'+(ev.time||'')+'</span>'+
-            (ev.target?'<span class="evt-target">'+ev.target+'</span>':'')+
+            (ev.target?'<span class="evt-target">'+bvLink(ev.target)+'</span>':'')+
           '</div>'+
-          '<div class="evt-note">'+(ev.note||'')+'</div>'+
+          '<div class="evt-note">'+bvLink(ev.note||'')+'</div>'+
         '</div>'+
       '</div>';
     }).join('');
@@ -468,7 +473,9 @@ async function loadTasks(){
   wrap.innerHTML=list.map(function(t){
     var chip='<span class="task-chip '+(t.enabled===false?'disabled':(t.todayDone?'done':'pending'))+'">'+
       (t.enabled===false?'已暂停':(t.todayDone?(t.todayStatus==='fail'?'失败':'今日已完成'):'待触发'))+'</span>';
+    var typeTag='';if(t.type==='script')typeTag='<span class="task-chip" style="background:#f0f5ff;color:#1890ff;border-color:#adc6ff">脚本</span>';
     var meta='<div class="task-meta">'+
+      typeTag+
       '<span class="task-chip">'+(t.days||'每天')+'</span>'+
       '<span class="task-chip">'+(t.time||'--:--')+'</span>'+
       '<span class="task-chip">提前'+(t.leadMin||0)+'分钟</span>'+
@@ -478,6 +485,7 @@ async function loadTasks(){
     var desc='';if(t.description)desc='<div class="task-desc">'+t.description+'</div>';
     var tmpl='';if(t.template)tmpl='<div class="task-desc" style="opacity:.6">预设文案: '+t.template.slice(0,60)+(t.template.length>60?'...':'')+'</div>';
     var act='<div class="task-actions">'+
+      '<button class="btn ghost" data-id="'+t.id+'" onclick="runNowTask(this)">立即执行</button>'+
       '<button class="btn ghost" data-id="'+t.id+'" onclick="editTask(this)">编辑</button>'+
       '<button class="btn ghost" data-id="'+t.id+'" onclick="toggleTask(this)">'+(t.enabled===false?'启用':'暂停')+'</button>'+
       '<button class="btn ghost danger" data-id="'+t.id+'" onclick="deleteTask(this)">删除</button>'+
@@ -584,6 +592,108 @@ async function runTool(kind){
 
 loadTasks();
 setInterval(loadTasks,30000);
+
+function loadTaskDashboard(){
+  var d=new Date();
+  document.getElementById('task-date').textContent=d.toLocaleDateString('zh-CN')+' '+['周日','周一','周二','周三','周四','周五','周六'][d.getDay()];
+
+  fetch('/api/daily-report').then(function(r){return r.json()}).then(function(d){
+    var box=document.getElementById('task-overview');
+    if(!box||!d)return;
+    var total=(d.archives||0)+(d.danmus||0)+(d.comments||0);
+    box.innerHTML=
+      '<div class="ov-chip"><div class="ov-num">'+(d.archives||0)+'</div><div class="ov-lbl">三连</div></div>'+
+      '<div class="ov-chip"><div class="ov-num">'+(d.danmus||0)+'</div><div class="ov-lbl">弹幕</div></div>'+
+      '<div class="ov-chip"><div class="ov-num">'+(d.comments||0)+'</div><div class="ov-lbl">评论</div></div>'+
+      '<div class="ov-chip accent"><div class="ov-num">'+total+'</div><div class="ov-lbl">今日互动</div></div>'+
+      '<div class="ov-chip"><div class="ov-num">'+(d.totalLogs||0)+'</div><div class="ov-lbl">日志条数</div></div>';
+  }).catch(function(){});
+
+  fetch('/api/daily-checkin').then(function(r){return r.json()}).then(function(c){
+    var box=document.getElementById('checkin-box');
+    if(!box)return;
+    if(!c.ok){box.innerHTML='<span class="mini" style="color:#ff4d4f">'+(c.error||'查询失败')+'</span>';return}
+    var level=c.level||{};
+    var levelHtml='';
+    if(level.current_level!=null){
+      var cur=level.current_exp||0;var next=level.next_exp||1;var min=level.current_min||0;
+      var pct=Math.min(100,Math.round((cur-min)/(next-min)*100));
+      levelHtml='<div class="ci-level">'+
+        '<div class="ci-lv">Lv.'+level.current_level+'</div>'+
+        '<div class="ci-bar-bg"><div class="ci-bar" style="width:'+pct+'%"></div></div>'+
+        '<div class="ci-exp">'+cur+' / '+next+' 经验</div>'+
+      '</div>';
+    }
+    var taskHtml=(c.tasks||[]).map(function(t){
+      return '<div class="ci-task '+(t.done?'done':'')+'">'+
+        '<span class="ci-check">'+(t.done?'✓':'○')+'</span>'+
+        '<span class="ci-name">'+t.label+'</span>'+
+        '<span class="ci-exp">+'+t.exp+' 经验</span>'+
+      '</div>';
+    }).join('');
+    box.innerHTML=levelHtml+'<div class="ci-total">今日可得: <b>'+c.totalExp+'</b> 经验 '+
+      (c.allDone?'<span style="color:#52c41a">· 全部完成 🎉</span>':'<span style="color:#faad14">· 还有未完成</span>')+'</div>'+
+      '<div class="ci-tasks">'+taskHtml+'</div>';
+  }).catch(function(){});
+
+  fetch('/api/follow/status').then(function(r){return r.json()}).then(function(f){
+    var box=document.getElementById('follow-box');
+    if(!box)return;
+    var statusHtml=f.running?'<span class="tag ok">● 运行中 (PID '+f.pid+')</span>':'<span class="tag err">○ 已停止</span>';
+    var modeHtml=f.noComment?'<span class="tag warn">养号模式</span>':'<span class="tag ok">全功能模式</span>';
+    var whitelist=f.onlyWhitelist?'<span class="tag">仅白名单</span>':'<span class="tag">全部关注</span>';
+    var btnHtml=f.running?'<button class="btn ghost danger" onclick="followToggle(\'stop\')">停止守望</button>':'<button class="btn primary" onclick="followToggle(\'start\')">启动守望</button>';
+    box.innerHTML='<div class="follow-head">'+statusHtml+modeHtml+whitelist+'</div>'+
+      '<div class="follow-info">扫描间隔: <b>'+f.interval+'s</b> ('+(Math.round(f.interval/60*10)/10)+' 分钟)</div>'+
+      '<div style="margin-top:10px">'+btnHtml+'</div>';
+  }).catch(function(){});
+
+  fetch('/api/follow/sync-status').then(function(r){return r.json()}).then(function(s){
+    var box=document.getElementById('sync-box');
+    var info=document.getElementById('sync-info');
+    if(!box)return;
+    if(s.total===0){box.innerHTML='<span class="mini" style="color:var(--c-text-mid)">暂无同步计划</span>';return}
+    if(info&&s.lastRunDate)info.textContent='上次: '+s.lastRunDate+' · 今日: '+s.doneToday;
+    var barColor=s.remaining>0?'#1890ff':'#52c41a';
+    box.innerHTML=
+      '<div class="sync-bar-bg"><div class="sync-bar" style="width:'+s.pct+'%;background:'+barColor+'"></div></div>'+
+      '<div class="sync-nums">'+
+        '<span>总目标 <b>'+s.total+'</b></span>'+
+        '<span style="color:#52c41a">已同步 <b>'+s.done+'</b></span>'+
+        '<span style="color:#ff4d4f">失败 <b>'+s.failed+'</b></span>'+
+        '<span style="color:#faad14">剩余 <b>'+s.remaining+'</b></span>'+
+        '<span class="mini">('+s.pct+'%)</span>'+
+      '</div>'+
+      (s.recentFailures&&s.recentFailures.length?'<div style="margin-top:8px;font-size:12px;color:#ff4d4f">最近失败: '+s.recentFailures.map(function(x){return x.uname+'('+x.code+')'}).join(' · ')+'</div>':'')+
+      '<div style="margin-top:10px"><button class="btn ghost" onclick="runFollowSync()">立即手动跑一轮</button></div>';
+  }).catch(function(){});
+}
+
+window.runFollowSync=async function(){
+  var r=await fetch('/api/task/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'follow-sync'})}).then(function(r){return r.json()});
+  if(r&&r.ok)toast('关注同步执行成功','success');
+  else toast('执行失败: '+(r&&r.err?r.err.slice(0,60):'未知错误'),'error');
+  loadTaskDashboard();loadTasks();
+};
+loadTaskDashboard();
+setInterval(loadTaskDashboard,60000);
+
+window.runNowTask=async function(btn){
+  var id=btn.dataset.id;
+  var oldText=btn.textContent;
+  btn.textContent='执行中...';btn.disabled=true;
+  var r=await fetch('/api/task/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}).then(function(r){return r.json()});
+  btn.textContent=oldText;btn.disabled=false;
+  if(r&&r.ok){toast('任务执行成功','success');loadTasks()}
+  else toast('执行失败: '+(r&&r.err?r.err.slice(0,60):'未知错误'),'error');
+};
+
+window.followToggle=async function(action){
+  var r=await fetch('/api/follow/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:action})}).then(function(r){return r.json()});
+  if(r&&r.ok)toast(action==='start'?'守望已启动':'守望已停止','success');
+  else toast('操作失败','error');
+  loadTaskDashboard();
+};
 
 async function showTokenChart(){
   var modal=document.getElementById('token-modal');
@@ -879,28 +989,294 @@ function loadDailyReport() {
   }).catch(function(){});
 }
 
-function loadBiliStats() {
-  fetch('/api/bili-stats').then(function(r){return r.json()}).then(function(d){
-    var unameEl = document.getElementById('bili-uname');
-    if (unameEl && d.ok) unameEl.textContent = d.uname ? '· '+d.uname+' (UID '+d.mid+')' : '';
-    var statMap = {
-      following: d.stat?.following || 0,
-      follower: d.stat?.follower || 0,
-      likes: d.stat?.likes || 0,
-      at: d.unread?.at || 0,
-      reply: d.unread?.reply || 0,
-      likeReply: d.unread?.likeReply || 0,
+var _biliStatsCache = null;
+var _currentEcoTab = 'self';
+
+function setupEcoTabs() {
+  document.querySelectorAll('.eco-tab').forEach(function(btn){
+    btn.onclick = function(){
+      document.querySelectorAll('.eco-tab').forEach(function(b){b.classList.remove('active')});
+      btn.classList.add('active');
+      _currentEcoTab = btn.dataset.eco || 'self';
+      renderBiliStats();
     };
-    Object.keys(statMap).forEach(function(role){
-      var card = document.querySelector('.mini-stat[data-role="'+role+'"]');
-      if (!card) return;
-      var numEl = card.querySelector('.mini-num');
-      animateNumber(numEl, statMap[role], 1000);
-    });
+  });
+}
+
+function renderBiliStats() {
+  if (!_biliStatsCache) return;
+  var d = _biliStatsCache;
+  var src = _currentEcoTab === 'owner' ? d.owner : d.self;
+  if (!src) return;
+
+  var statMap = {
+    following: src.following || 0,
+    follower: src.follower || 0,
+    likes: src.likes || 0,
+    at: (_currentEcoTab === 'self' && src.unread) ? src.unread.at : 0,
+    reply: (_currentEcoTab === 'self' && src.unread) ? src.unread.reply : 0,
+    likeReply: (_currentEcoTab === 'self' && src.unread) ? src.unread.likeReply : 0,
+  };
+
+  var unameEl = document.getElementById('bili-uname');
+  if (unameEl) {
+    var label = _currentEcoTab === 'owner' ? '主号' : '小号';
+    var name = src.name || src.uname || '';
+    var mid = src.mid || '';
+    unameEl.textContent = label + ' · ' + (name || '未知') + (mid ? ' (UID ' + mid + ')' : '');
+  }
+
+  Object.keys(statMap).forEach(function(role){
+    var card = document.querySelector('.mini-stat[data-role="'+role+'"]');
+    if (!card) return;
+    if (_currentEcoTab === 'owner' && card.dataset.ecoOnly) {
+      card.style.display = 'none';
+      return;
+    }
+    card.style.display = '';
+    var numEl = card.querySelector('.mini-num');
+    animateNumber(numEl, statMap[role], 800);
+  });
+}
+
+function checkCookieStatus() {
+  fetch('/api/bili-stats').then(function(r){return r.json()}).then(function(d){
+    _biliStatsCache = d;
+    renderBiliStats();
+    updateCookieUI(d);
   }).catch(function(){});
 }
 
+function formatExpire(expireTs) {
+  if (!expireTs) return null;
+  try {
+    var ts = Number(expireTs);
+    if (!ts || ts <= 0) return null;
+    var now = Date.now() / 1000;
+    var leftSec = ts - now;
+    if (leftSec <= 0) return '已过期';
+    var days = Math.floor(leftSec / 86400);
+    var hours = Math.floor((leftSec % 86400) / 3600);
+    var mins = Math.floor((leftSec % 3600) / 60);
+    if (days > 0) return '剩 ' + days + ' 天 ' + hours + ' 小时';
+    if (hours > 0) return '剩 ' + hours + ' 小时 ' + mins + ' 分';
+    return '剩 ' + mins + ' 分钟';
+  } catch { return null; }
+}
+
+function updateCookieUI(d) {
+  var cookieInfo = d.cookieInfo;
+  var biliApiStat = document.getElementById('stat-bili-api');
+  var biliApiValue = biliApiStat ? biliApiStat.querySelector('.value') : null;
+
+  if (!cookieInfo) {
+    if (biliApiStat) {
+      biliApiStat.classList.remove('ok', 'err', 'warn');
+      biliApiStat.classList.add('err');
+    }
+    if (biliApiValue) biliApiValue.textContent = '未配置 Cookie';
+    setSidebarCookieBadge(null);
+    setCredsPageCookieStatus(null);
+    return;
+  }
+
+  var isLogin = cookieInfo.isLogin === true;
+  var expireStr = formatExpire(cookieInfo.expireTs);
+
+  if (isLogin && expireStr !== '已过期') {
+    if (biliApiStat) { biliApiStat.classList.remove('err', 'warn'); biliApiStat.classList.add('ok'); }
+    if (biliApiValue) biliApiValue.textContent = 'Cookie OK · ' + (expireStr || '有效');
+  } else if (isLogin === false) {
+    if (biliApiStat) { biliApiStat.classList.remove('ok', 'warn'); biliApiStat.classList.add('err'); }
+    if (biliApiValue) biliApiValue.textContent = 'Cookie 已失效';
+  } else {
+    if (biliApiStat) { biliApiStat.classList.remove('ok', 'err'); biliApiStat.classList.add('warn'); }
+    if (biliApiValue) biliApiValue.textContent = 'Cookie 临期 · ' + expireStr;
+  }
+
+  setSidebarCookieBadge(isLogin ? 'ok' : 'expired', expireStr);
+  setCredsPageCookieStatus(isLogin ? 'ok' : 'expired', expireStr);
+
+  if (!isLogin && !window._cookieWarned) {
+    window._cookieWarned = true;
+    toast('⚠️ B站 Cookie 已失效，请前往「凭据」页更新', 'error');
+  } else if (expireStr && expireStr.indexOf('剩') === 0) {
+    var days = parseInt(expireStr, 10);
+    if (days <= 3 && days >= 1 && !window._cookieWarnedSoon) {
+      window._cookieWarnedSoon = true;
+      toast('⏰ Cookie 即将过期，' + expireStr, 'info');
+    }
+  }
+}
+
+function setSidebarCookieBadge(status, expireStr) {
+  var desc = document.querySelector('.sb-user-desc');
+  if (!desc) return;
+  if (status === 'ok') {
+    desc.innerHTML = '<span style="color:#52c41a"><span class="iconfont icon-dot" style="font-size:8px"></span> Cookie 有效</span>' +
+      (expireStr ? '<span style="color:#888;margin-left:6px;font-size:11px">(' + expireStr + ')</span>' : '');
+  } else if (status === 'expired') {
+    desc.innerHTML = '<span style="color:#ff4d4f;font-weight:600"><span class="iconfont icon-report"></span> Cookie 已过期</span>' +
+      '<a href="javascript:void(0)" onclick="document.querySelector(\'.tab[data-tab=creds]\').click()" style="color:#ff7875;margin-left:6px;font-size:11px;text-decoration:underline">去更新 →</a>';
+  } else {
+    desc.innerHTML = '<span style="color:#888">B站小号 · 养号中</span>';
+  }
+}
+
+function setCredsPageCookieStatus(status, expireStr) {
+  var tag = document.getElementById('bili-status');
+  if (!tag) return;
+  if (status === 'ok') {
+    tag.className = 'tag online';
+    tag.textContent = 'Cookie OK' + (expireStr ? ' · ' + expireStr : '');
+  } else if (status === 'expired') {
+    tag.className = 'tag offline';
+    tag.textContent = 'Cookie 已过期，急需更新！';
+  } else {
+    tag.className = 'tag offline';
+    tag.textContent = '未配置';
+  }
+}
+
+setupEcoTabs();
 loadDailyReport();
-loadBiliStats();
+checkCookieStatus();
 setInterval(loadDailyReport, 60000);
-setInterval(loadBiliStats, 120000);
+setInterval(checkCookieStatus, 300000);
+
+// ===== 数据面板图表 =====
+var _dataPanelLoaded = false;
+var _dataPanelCache = null;
+var _dataCurrentAcc = 'self';
+
+function setupDataPanel() {
+  var group = document.getElementById('data-account');
+  if (group) {
+    group.querySelectorAll('.seg-btn').forEach(function(btn){
+      btn.onclick = function(){
+        group.querySelectorAll('.seg-btn').forEach(function(b){b.classList.remove('active')});
+        btn.classList.add('active');
+        _dataCurrentAcc = btn.dataset.acc;
+        if (_dataPanelCache) {
+          drawDataCharts(_dataPanelCache);
+          renderDataSummary(_dataPanelCache);
+        }
+      };
+    });
+  }
+}
+
+function loadDataPanel() {
+  if (_dataPanelLoaded) return;
+  _dataPanelLoaded = true;
+  fetch('/api/stats-history').then(function(r){return r.json()}).then(function(d){
+    if (!d.ok || !Array.isArray(d.data)) return;
+    _dataPanelCache = d.data.sort(function(a,b){return a.date.localeCompare(b.date)});
+    drawDataCharts(_dataPanelCache);
+    renderDataSummary(_dataPanelCache);
+  }).catch(function(){});
+}
+
+function drawDataCharts(list) {
+  ['follower','following','likes'].forEach(function(key){
+    drawSingleChart('chart-'+key, list, key);
+  });
+}
+
+function drawSingleChart(svgId, list, key) {
+  var svg = document.getElementById(svgId);
+  if (!svg || !list.length) return;
+  var W = 600, H = 200, padL = 42, padR = 14, padT = 12, padB = 28;
+  var plotW = W - padL - padR, plotH = H - padT - padB;
+
+  var points = list.map(function(entry, idx){
+    var src = _dataCurrentAcc === 'owner' ? entry.owner : entry.self;
+    if (!src) return null;
+    return { date: entry.date, idx: idx, val: Number(src[key]) || 0 };
+  }).filter(Boolean);
+
+  if (!points.length) {
+    svg.innerHTML = '<text x="300" y="100" class="chart-label" text-anchor="middle">暂无数据</text>';
+    return;
+  }
+
+  var vals = points.map(function(p){return p.val});
+  var vmin = Math.min.apply(null, vals);
+  var vmax = Math.max.apply(null, vals);
+  if (vmin === vmax) { vmin -= 1; vmax += 1; }
+  var vrange = vmax - vmin;
+
+  function xPos(i) {
+    return points.length === 1 ? padL + plotW/2 : padL + (i / (points.length-1)) * plotW;
+  }
+  function yPos(v) {
+    return padT + plotH - ((v - vmin) / vrange) * plotH;
+  }
+
+  var color = key === 'follower' ? '#ff7eb9' : key === 'following' ? '#52c41a' : '#faad14';
+
+  var gridLines = '';
+  for (var g = 0; g <= 4; g++) {
+    var gy = padT + (g / 4) * plotH;
+    var gval = Math.round(vmax - (g / 4) * vrange);
+    gridLines += '<line x1="'+padL+'" y1="'+gy+'" x2="'+(W-padR)+'" y2="'+gy+'" class="chart-grid"/>';
+    gridLines += '<text x="'+(padL-6)+'" y="'+(gy+3)+'" text-anchor="end" class="chart-label">'+gval+'</text>';
+  }
+
+  var linePath = '', areaPath = '';
+  points.forEach(function(p, i){
+    var x = xPos(i), y = yPos(p.val);
+    linePath += (i === 0 ? 'M' : 'L') + x + ',' + y + ' ';
+    areaPath += (i === 0 ? 'M' : 'L') + x + ',' + y + ' ';
+  });
+  var firstX = xPos(0), lastX = xPos(points.length-1);
+  areaPath += 'L' + lastX + ',' + (padT + plotH) + ' L' + firstX + ',' + (padT + plotH) + ' Z';
+
+  var dots = '', xLabels = '';
+  points.forEach(function(p, i){
+    var x = xPos(i), y = yPos(p.val);
+    dots += '<circle cx="'+x+'" cy="'+y+'" r="3.5" fill="'+color+'" stroke="#fff" stroke-width="1.5" class="chart-dot"><title>'+p.date+' · '+p.val+'</title></circle>';
+    if (points.length <= 12 || i % Math.ceil(points.length/8) === 0 || i === points.length-1) {
+      xLabels += '<text x="'+x+'" y="'+(H-8)+'" text-anchor="middle" class="chart-label">'+p.date.slice(5)+'</text>';
+    }
+  });
+
+  svg.innerHTML = gridLines +
+    '<path d="'+areaPath+'" fill="'+color+'" class="chart-area"/>' +
+    '<path d="'+linePath+'" stroke="'+color+'" class="chart-line"/>' +
+    dots + xLabels;
+}
+
+function renderDataSummary(list) {
+  var box = document.getElementById('data-summary');
+  if (!box || !list.length) return;
+  var latest = list[list.length - 1];
+  var first = list[0];
+  var acc = _dataCurrentAcc === 'owner' ? 'owner' : 'self';
+  var startSrc = first[acc] || {};
+  var endSrc = latest[acc] || {};
+  var diffFollower = (endSrc.follower || 0) - (startSrc.follower || 0);
+  var diffFollowing = (endSrc.following || 0) - (startSrc.following || 0);
+  var diffLikes = (endSrc.likes || 0) - (startSrc.likes || 0);
+  var days = list.length;
+
+  function chip(label, val, delta) {
+    var deltaStr = delta > 0 ? '<span style="color:#52c41a;margin-left:6px">+'+delta+'</span>' : delta < 0 ? '<span style="color:#ff4d4f;margin-left:6px">'+delta+'</span>' : '';
+    return '<div style="flex:1;padding:10px 14px;background:var(--c-bg2);border:1px solid var(--c-border2);border-radius:10px">' +
+      '<div style="font-size:11px;color:var(--c-text-mid)">'+label+'</div>' +
+      '<div style="font-size:20px;font-weight:700;color:var(--c-text)">'+val+deltaStr+'</div></div>';
+  }
+
+  box.innerHTML =
+    chip('运营天数', days + ' 天', 0) +
+    chip('粉丝累计增量', diffFollower, diffFollower) +
+    chip('关注净增量', diffFollowing, diffFollowing) +
+    chip('点赞累计增量', diffLikes, diffLikes);
+}
+
+setupDataPanel();
+document.querySelectorAll('.tab').forEach(function(tab){
+  tab.addEventListener('click', function(){
+    if (tab.dataset.tab === 'data') setTimeout(loadDataPanel, 80);
+  });
+});

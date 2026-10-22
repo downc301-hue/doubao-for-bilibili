@@ -14,6 +14,7 @@ import os from 'node:os'
 import path from 'node:path'
 import https from 'node:https'
 import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
 const DATA_DIR = path.join(os.homedir(), '.doubao-bot')
 const AT_PROCESSED_FILE = path.join(DATA_DIR, 'at-processed.json')
@@ -73,10 +74,20 @@ export function extractBv(uri) {
 }
 
 // ── 已处理 @ 持久化 ──
+// 注意：B 站 msgfeed/at 接口里同一条 @ 内容多次出现会用不同消息 id，所以不能用 atItem.id 去重
+// 必须用稳定指纹（aid + root_id + source_id）作为去重 key
+export function mkAtFingerprint({ aid, root_id, source_id }) {
+  return `${aid || 0}_${root_id || 0}_${source_id || 0}`
+}
+
 export function loadAtProcessed() {
   try {
     const raw = fs.readFileSync(AT_PROCESSED_FILE, 'utf8')
-    return new Set(Array.isArray(JSON.parse(raw)) ? raw : [])
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return new Set()
+    // 清洗污染数据：只保留合法 id（纯数字串 10+ 位）或稳定指纹（数字_数字_数字）
+    const clean = arr.filter(x => typeof x === 'string' && (/^\d{10,}$/.test(x) || /^\d+_\d+_\d+$/.test(x)))
+    return new Set(clean)
   } catch { return new Set() }
 }
 export function saveAtProcessed(id) {
@@ -88,18 +99,28 @@ export function saveAtProcessed(id) {
   } catch {}
 }
 
-// ── 查评论区是否已有小号回复 ──
+// ── 查评论区是否已有小号回复（同时查顶层 + 子评论） ──
 export async function checkAlreadyReplied(H, aid, rootId, sourceId, myMid) {
   if (!aid || !myMid) return false
   try {
+    // 1. 查子评论（root 下的回复）
     const root = sourceId && Number(sourceId) > 0 ? Number(sourceId)
                : rootId && Number(rootId) > 0 ? Number(rootId)
                : Number(aid)
-    const r = await fetch(`https://api.bilibili.com/x/v2/reply/reply?type=1&oid=${aid}&root=${root}`, { headers: H })
-    const j = await r.json()
-    if (j.code !== 0) return false
-    const replies = j.data?.replies || []
-    return replies.some(c => String(c.member?.mid) === String(myMid))
+    const r1 = await fetch(`https://api.bilibili.com/x/v2/reply/reply?type=1&oid=${aid}&root=${root}`, { headers: H })
+    const j1 = await r1.json()
+    if (j1.code === 0) {
+      const replies = j1.data?.replies || []
+      if (replies.some(c => String(c.member?.mid) === String(myMid))) return true
+    }
+    // 2. 查顶层评论（图片评论降级后走顶层，/x/v2/reply/main）
+    const r2 = await fetch(`https://api.bilibili.com/x/v2/reply/main?type=1&oid=${aid}&mode=3&ps=20`, { headers: H })
+    const j2 = await r2.json()
+    if (j2.code === 0) {
+      const replies = j2.data?.replies || []
+      if (replies.some(c => String(c.member?.mid) === String(myMid))) return true
+    }
+    return false
   } catch { return false }
 }
 
@@ -186,28 +207,61 @@ export async function uploadMeme(fileName) {
 }
 
 // 直接调 /x/v2/reply/add 发评论（支持 pictures 图片评论）
-export async function sendCommentDirect({ aid, message, root, parent, pictures }) {
+// 完全对齐 tools/commands/comment.mjs 的请求格式：WBI 签名 + plat=1 + buvid3 + video referer
+import crypto from 'node:crypto'
+const WBI_MIXIN_TAB = [46,47,18,2,53,8,23,32,15,50,10,31,58,3,45,35,27,43,5,49,33,9,42,19,29,28,14,39,12,38,41,13,37,48,7,16,24,55,40,61,26,17,0,1,60,51,30,4,22,25,54,21,56,59,6,63,57,62,11,36,20,34,44,52]
+const _wbiKeyOf = (u) => u.slice(u.lastIndexOf('/') + 1, u.lastIndexOf('.'))
+async function wbiSign(params, cookieHeader) {
+  try {
+    const nav = await (await fetch('https://api.bilibili.com/x/web-interface/nav', {
+      headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36', referer: 'https://www.bilibili.com/', cookie: cookieHeader },
+    })).json()
+    const img = nav?.data?.wbi_img?.img_url
+    const sub = nav?.data?.wbi_img?.sub_url
+    if (!img || !sub) return null
+    const raw = _wbiKeyOf(img) + _wbiKeyOf(sub)
+    const mixin = WBI_MIXIN_TAB.map((i) => raw[i]).join('').slice(0, 32)
+    const wts = Math.round(Date.now() / 1000)
+    const clean = (v) => String(v).replace(/[!'()*]/g, '')
+    const query = Object.keys({ ...params, wts })
+      .sort()
+      .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(clean(k === 'wts' ? wts : params[k]))}`)
+      .join('&')
+    const w_rid = crypto.createHash('md5').update(query + mixin).digest('hex')
+    return { w_rid, wts }
+  } catch { return null }
+}
+
+export async function sendCommentDirect({ aid, bvid, message, root, parent, pictures }) {
   const creds = getJson('credentials.json')
   const sess = creds.sessdata
   const jct = creds.bili_jct || creds.biliJct || ''
-  const body = new URLSearchParams({
-    oid: String(aid),
+  const buvid3 = creds.buvid3 || ''
+  const cookieHeader = 'SESSDATA=' + decodeURIComponent(sess) + '; bili_jct=' + jct + '; buvid3=' + buvid3
+  const params = {
     type: '1',
+    oid: String(aid),
     message: message || '分享图片',
-    root: String(root || 0),
-    parent: String(parent || 0),
+    plat: '1',
     csrf: jct,
-  })
-  if (pictures) body.set('pictures', JSON.stringify([pictures]))
-  const r = await fetch('https://api.bilibili.com/x/v2/reply/add', {
+  }
+  if (root) params.root = String(root)
+  if (parent) params.parent = String(parent)
+  if (pictures) params.pictures = JSON.stringify([pictures])
+  const signed = await wbiSign(params, cookieHeader)
+  const url = signed
+    ? `https://api.bilibili.com/x/v2/reply/add?w_rid=${signed.w_rid}&wts=${signed.wts}`
+    : 'https://api.bilibili.com/x/v2/reply/add'
+  const r = await fetch(url, {
     method: 'POST',
     headers: {
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      referer: 'https://www.bilibili.com/',
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      referer: bvid ? `https://www.bilibili.com/video/${bvid}/` : 'https://www.bilibili.com/',
+      origin: 'https://www.bilibili.com',
       'content-type': 'application/x-www-form-urlencoded',
-      cookie: 'SESSDATA=' + decodeURIComponent(sess) + '; bili_jct=' + jct,
+      cookie: cookieHeader,
     },
-    body: body.toString(),
+    body: new URLSearchParams(params).toString(),
   })
   return r.json()
 }
@@ -294,12 +348,14 @@ export async function fetchOwnerUntprocessedAts() {
 // ── 发回复（spawn comment.mjs） ──
 export function sendComment({ aid, bvid, message, root, parent }) {
   return new Promise((resolve) => {
-    const commentScript = path.join(path.resolve(process.cwd(), '..'), 'tools', 'commands', 'comment.mjs')
+    // 用 import.meta.url 定位，不受 process.cwd() 影响（宝塔/命令行 cwd 不同）
+    const commentScript = fileURLToPath(new URL('../commands/comment.mjs', import.meta.url))
     const args = ['--oid', String(aid), '--bvid', bvid, '--message', message, '--root', String(root), '--parent', String(parent), '--go']
-    const proc = spawn('node', [commentScript, ...args], { cwd: path.resolve(commentScript, '..', '..') })
+    const proc = spawn(process.execPath, [commentScript, ...args])
     let out = '', err = ''
     proc.stdout.on('data', b => out += b.toString())
     proc.stderr.on('data', b => err += b.toString())
+    proc.on('error', e => resolve({ code: -1, out, err: 'spawn error: ' + e.message }))
     proc.on('close', code => resolve({ code, out, err }))
   })
 }
@@ -318,9 +374,13 @@ export async function handleOwnerAt(atItem, opts = {}) {
   const root = sourceId
   const parent = sourceId
 
-  // 重复检查
+  // 重复检查（fingerprint 优先，atItem.id 兜底——msgfeed id 不稳定）
+  const fp = mkAtFingerprint(atItem)
+  if (loadAtProcessed().has(fp)) {
+    return { ok: true, skipped: true, reason: '指纹已处理过（fingerprint）' }
+  }
   if (myMid && await checkAlreadyReplied(H, aid, root, parent, myMid)) {
-    saveAtProcessed(String(atItem.id))
+    saveAtProcessed(fp)
     return { ok: true, skipped: true, reason: '评论区已存在我的回复' }
   }
 
@@ -335,24 +395,27 @@ export async function handleOwnerAt(atItem, opts = {}) {
 
   if (dry) return { ok: true, dry: true, message: replyText }
 
-  // 发送（优先图片评论：文字 + 场景表情图；失败降级纯文字）
-  if (cfg.bili?.imageReply !== false) {
+  // 发送（默认走子评论+B站官方表情；config.json 显式开 bili.imageReply=true 才尝试自定义图片评论）
+  // 注：B 站硬限制 code=-400 子评论不能带图，所以自定义图只能走顶层评论+@ 形式，互动感差
+  if (cfg.bili?.imageReply === true) {
     try {
       const meme = pickMeme(atItem.content, replyText)
       const pic = await uploadMeme(meme.file)
       if (pic) {
-        const j = await sendCommentDirect({ aid, message: replyText, root, parent, pictures: pic })
+        // 只试子评论带图（B站硬限制 code=-400 子评论不能带图）
+        // 规则：主人已经在原评论里 @ 过小号，小号只回子评论盖楼，绝不再发顶层评论
+        const j = await sendCommentDirect({ aid, bvid: atItem.bvid, message: replyText, root, parent, pictures: pic })
         if (j.code === 0) {
-          saveAtProcessed(String(atItem.id))
+          saveAtProcessed(fp)
           return { ok: true, message: replyText, meme: meme.name }
         }
-        console.log('[image-reply] code=' + j.code + ' ' + (j.message || '') + '，降级纯文字')
+        console.log('[image-reply] code=' + j.code + ' message=' + (j.message || '') + '，降级子评论纯文字')
       }
     } catch (e) { console.log('[image-reply]', e?.message || e, '，降级纯文字') }
   }
   const r = await sendComment({ aid, bvid: atItem.bvid, message: replyText, root, parent })
   if (r.code !== 0) return { ok: false, error: `评论发送失败(code=${r.code}): ${r.err.trim() || r.out.trim()}` }
 
-  saveAtProcessed(String(atItem.id))
+  saveAtProcessed(fp)
   return { ok: true, message: replyText }
 }

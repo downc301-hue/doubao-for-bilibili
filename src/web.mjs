@@ -5,7 +5,7 @@ import os from 'node:os'
 import https from 'node:https'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { getTasks, setTasks, getState, markDone, markFail, startScheduler, startFollowWatcher, stopFollowWatcher, getFollowStatus, getNextRun } from './scheduler.mjs'
+import { getTasks, setTasks, getState, markDone, markFail, startScheduler, startFollowWatcher, stopFollowWatcher, getFollowStatus, getNextRun, runTask } from './scheduler.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -222,9 +222,29 @@ function readToolLog() {
 
 function bjDate(iso) {
   try {
-    const d = new Date(iso)
-    return d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' })
+    // 统一输出 YYYY-MM-DD：toLocaleDateString('zh-CN') 会返回 2026/10/22，
+    // 与历史快照的 2026-10-22 不一致，导致同一天出现两条、日增量算重
+    const d = new Date(new Date(iso).getTime() + 8 * 3600 * 1000)
+    return d.toISOString().slice(0, 10)
   } catch { return '' }
+}
+
+function saveStatsSnapshot(snapshot) {
+  try {
+    const dir = resolveDataDir()
+    const f = path.join(dir, 'stats-history.json')
+    let data = []
+    try { data = JSON.parse(fs.readFileSync(f, 'utf8')) } catch {}
+    const today = bjDate(new Date().toISOString())
+    const existing = data.findIndex(x => x.date === today)
+    const entry = { date: today, ts: Date.now(), ...snapshot }
+    if (existing >= 0) {
+      data[existing] = entry
+    } else {
+      data.push(entry)
+    }
+    fs.writeFileSync(f, JSON.stringify(data.slice(-60), null, 2))
+  } catch {}
 }
 
 function summarizeTools(tools) {
@@ -262,43 +282,6 @@ function summarizeTools(tools) {
     if (t === 'dm') out.dms.push({ to: a.to || a.mid || '', text: String(a.text || '').slice(0, 80) })
   }
   return out
-}
-
-function bjTime(iso) {
-  try {
-    return new Date(iso).toLocaleTimeString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }).slice(0, 5)
-  } catch { return String(iso || '').slice(11, 16) }
-}
-
-// 北京时间 YYYY-MM-DD（tokens.json 用的是这个格式，不要用带斜杠的 bjDate）
-function bjDateISO(iso) {
-  try {
-    const d = new Date(iso)
-    const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d)
-    const get = (t) => p.find(x => x.type === t)?.value || ''
-    return `${get('year')}-${get('month')}-${get('day')}`
-  } catch { return new Date().toISOString().slice(0, 10) }
-}
-
-function statsHistory() {
-  return getJson('stats-history.json')
-}
-
-// 每次拉到账号数据就落一份当日快照，用于计算日增量（纯本地读写，零成本）
-function snapshotStats(s) {
-  try {
-    const hist = statsHistory()
-    hist[bjDateISO(new Date().toISOString())] = {
-      following: s.following ?? 0,
-      follower: s.follower ?? 0,
-      likes: s.likes ?? 0,
-      level: s.level ?? null,
-      at: new Date().toISOString(),
-    }
-    const days = Object.keys(hist).sort()
-    for (const d of days.slice(0, Math.max(0, days.length - 120))) delete hist[d]
-    setJson('stats-history.json', hist)
-  } catch {}
 }
 
 function buildDiaryPrompt(cfg, s) {
@@ -416,6 +399,7 @@ function sendStatic(res, relPath, contentType) {
     res.writeHead(200, {
       'Content-Type': contentType + '; charset=utf-8',
       'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
     })
     res.end(data)
   } catch {
@@ -438,20 +422,21 @@ async function api(req, res, pathname) {
   if (pathname === '/' && req.method === 'GET') {
     return sendStatic(res, 'public/index.html', 'text/html')
   }
+  if (pathname === '/main.css' && req.method === 'GET') {
+    return sendStatic(res, 'public/main.css', 'text/css')
+  }
   if (pathname === '/styles.css' && req.method === 'GET') {
-    return sendStatic(res, 'public/styles.css', 'text/css')
+    return sendStatic(res, 'public/main.css', 'text/css')
   }
   if (pathname === '/app.js' && req.method === 'GET') {
     return sendStatic(res, 'public/app.js', 'application/javascript')
   }
-  // iconfont 图标
   if (pathname === '/iconfont.css' && req.method === 'GET') return sendStatic(res, 'font/iconfont.css', 'text/css')
   if (pathname === '/iconfont.woff2' && req.method === 'GET') return sendStatic(res, 'font/iconfont.woff2', 'font/woff2')
   if (pathname === '/iconfont.woff' && req.method === 'GET') return sendStatic(res, 'font/iconfont.woff', 'font/woff')
   if (pathname === '/iconfont.ttf' && req.method === 'GET') return sendStatic(res, 'font/iconfont.ttf', 'font/ttf')
   if (pathname === '/doubao.svg' && req.method === 'GET') return sendStatic(res, 'font/doubao.svg', 'image/svg+xml')
   if (pathname === '/doubao.png' && req.method === 'GET') return sendStatic(res, 'font/doubao.png', 'image/png')
-  // AI 立绘形象库
   const mascotMatch = pathname.match(/^\/mascot\/([A-Za-z0-9_-]+\.png)$/)
   if (mascotMatch && req.method === 'GET') return sendStatic(res, 'public/mascot/' + mascotMatch[1], 'image/png')
   if (pathname === '/config' && req.method === 'GET') {
@@ -784,6 +769,124 @@ async function api(req, res, pathname) {
     }
     return send(res, 200, JSON.stringify(results))
   }
+  if (pathname === '/api/daily-checkin' && req.method === 'GET') {
+    return (async () => {
+      const h = biliReqHeaders()
+      if (!h) return send(res, 200, JSON.stringify({ ok: false, error: 'Cookie缺失' }))
+      let level = null, reward = null, err = null
+      try {
+        const r1 = await fetch('https://api.bilibili.com/x/web-interface/nav', { headers: h })
+        const j1 = await r1.json()
+        if (j1?.code === 0) {
+          level = j1.data?.level_info
+        }
+      } catch (e) { err = String(e.message) }
+      try {
+        const r2 = await fetch('https://api.bilibili.com/x/member/web/exp/reward', { headers: h })
+        const j2 = await r2.json()
+        if (j2?.code === 0) reward = j2.data
+      } catch (e) { err = (err ? err + '; ' : '') + String(e.message) }
+
+      const tasks = []
+      const expMap = { login: 10, watch: 5, coins: 5, share: 10 }
+      if (reward) {
+        const labels = { login: '每日登录', watch: '观看视频', coins: '投币', share: '分享视频' }
+        for (const k of ['login', 'watch', 'coins', 'share']) {
+          const v = reward[k]
+          if (typeof v === 'boolean') {
+            tasks.push({ key: k, label: labels[k], exp: expMap[k], done: v })
+          } else if (typeof v === 'number') {
+            tasks.push({ key: k, label: labels[k], exp: expMap[k], done: v >= (k === 'coins' ? 5 : 1), progress: v })
+          }
+        }
+      }
+
+      const totalExp = tasks.reduce((s, t) => s + (t.done ? t.exp : 0), 0)
+
+      return send(res, 200, JSON.stringify({
+        ok: !err,
+        level,
+        tasks,
+        totalExp,
+        allDone: tasks.every(t => t.done),
+        error: err,
+      }))
+    })()
+  }
+
+  if (pathname === '/api/follow/status' && req.method === 'GET') {
+    const st = getFollowStatus()
+    let cfg = {}
+    try { cfg = JSON.parse(fs.readFileSync(path.join(resolveDataDir(), 'follow-config.json'), 'utf8')) } catch {}
+    return send(res, 200, JSON.stringify({
+      running: st.running,
+      pid: st.pid,
+      enabled: cfg.enabled !== false,
+      interval: cfg.interval || 300,
+      noComment: !!cfg.noComment,
+      onlyWhitelist: !!cfg.onlyWhitelist,
+    }))
+  }
+
+  if (pathname === '/api/follow/toggle' && req.method === 'POST') {
+    const body = await parseBody(req)
+    const action = body.action
+    try {
+      if (action === 'start') startFollowWatcher()
+      else if (action === 'stop') stopFollowWatcher()
+    } catch (e) { return send(res, 500, JSON.stringify({ ok: false, error: String(e.message) })) }
+    return send(res, 200, JSON.stringify({ ok: true }))
+  }
+
+  if (pathname === '/api/task/run' && req.method === 'POST') {
+    const body = await parseBody(req)
+    const id = body.id
+    const tasks = getTasks()
+    const task = tasks.find(t => t.id === id)
+    if (!task) return send(res, 404, JSON.stringify({ ok: false, error: '任务不存在' }))
+    send(res, 200, JSON.stringify({ ok: true, message: '任务已启动', id: task.id, name: task.name }))
+    runTask(task).catch(e => console.error('[task/run] error:', e?.message))
+    return
+  }
+
+  if (pathname === '/api/follow/sync-status' && req.method === 'GET') {
+    const stateFile = path.join(resolveDataDir(), 'follow-sync-state.json')
+    const planFile = path.join(resolveDataDir(), 'follow-sync-plan.json')
+    const ownerPlan = path.join(process.cwd(), 'owner-followings.json')
+    const credFile = path.join(resolveDataDir(), 'credentials.json')
+    const configFile = path.join(resolveDataDir(), 'config.json')
+    let state = {}, plan = {}
+    try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')) } catch {}
+    try { plan = JSON.parse(fs.readFileSync(planFile, 'utf8')) } catch {}
+    let total = state.totalToFollow || plan.toFollow?.length || 0
+    try {
+      const ownerList = JSON.parse(fs.readFileSync(ownerPlan, 'utf8'))
+      let selfMid = ''
+      try {
+        const cfg = JSON.parse(fs.readFileSync(configFile, 'utf8'))
+        selfMid = String(cfg.bili?.selfMid || '')
+      } catch {}
+      total = ownerList.filter(u => String(u.mid) !== selfMid).length || total
+    } catch {}
+    const results = state.results || []
+    const lastByMid = new Map()
+    for (const r of results) lastByMid.set(r.mid, r)
+    let done = 0, failed = 0
+    for (const r of lastByMid.values()) {
+      if (r.code === 0 || r.code === 22002) done++
+      else if (r.code === 22014 || r.code === 22015) failed++
+    }
+    const pct = total > 0 ? Math.min(100, Math.round(done / total * 100)) : 0
+    const remaining = Math.max(0, total - done)
+    return send(res, 200, JSON.stringify({
+      total, done, failed, remaining, pct,
+      lastRunDate: state.lastRunDate || null,
+      lastIndex: state.lastIndex || 0,
+      doneToday: state.doneToday || 0,
+      recentFailures: results.filter(r => r.code !== 0 && r.code !== 22002).slice(-5).reverse(),
+    }))
+  }
+
   if (pathname === '/api/abort' && req.method === 'POST') {
     try {
       abortAgentRun()
@@ -892,129 +995,89 @@ async function api(req, res, pathname) {
       actions: actions.slice(-80).reverse(),
     }))
   }
-  if (pathname === '/api/export-log' && req.method === 'GET') {
-    const allLogs = readWhaleLog()
-    const today = bjDateISO(new Date().toISOString())
-    const todayLogs = allLogs.filter(e => bjDateISO(e.at) === today)
-    const counts = { archive: 0, like: 0, fav: 0, share: 0, danmu: 0 }
-    const commentList = [], failList = []
-    for (const e of todayLogs) {
-      if (e.kind === 'comment') {
-        commentList.push({ time: bjTime(e.at), bv: e.target || '', note: e.note || e.text || '', ok: e.success !== false })
-        continue
-      }
-      if (e.kind !== 'tool_call' && e.kind !== 'action') continue
-      const t = e.tool || ''
-      if (t in counts) counts[t]++
-      if (e.success === false) failList.push({ time: bjTime(e.at), tool: t, target: e.target || '', note: e.note || '' })
-    }
-
-    const cfg = getJson('config.json')
-    const budget = cfg.budget?.dailyTokens || 50000
-    const tokens = getJson('tokens.json')
-    const tokenToday = (tokens.history || []).find(h => h.date === today)?.total || 0
-
-    const hist = statsHistory()
-    const histDays = Object.keys(hist).sort()
-    const prevDay = histDays.filter(d => d < today).pop()
-    const cur = hist[today] || null
-    const prev = prevDay ? hist[prevDay] : null
-    const delta = (k) => (cur && prev && Number.isFinite(cur[k]) && Number.isFinite(prev[k])) ? (cur[k] - prev[k]) : null
-    const fmtDelta = (k) => { const d = delta(k); return d === null ? '' : (d >= 0 ? `（较${prevDay} +${d}）` : `（较${prevDay} ${d}）`) }
-
-    const allDays = [...new Set(allLogs.map(e => bjDateISO(e.at)).filter(Boolean))].sort()
-    const dayNo = allDays.length ? Math.floor((new Date(today) - new Date(allDays[0])) / 86400000) : 0
-
-    const L = []
-    L.push(`# Day ${dayNo} 日志素材 · ${today}`)
-    L.push('')
-    L.push('## 一、账号数据')
-    if (cur) {
-      L.push(`- 关注：${cur.following}${fmtDelta('following')}`)
-      L.push(`- 粉丝：${cur.follower}${fmtDelta('follower')}`)
-      L.push(`- 累计获赞：${cur.likes}${fmtDelta('likes')}`)
-      L.push(`- 等级：Lv${cur.level ?? '-'}`)
-    } else {
-      L.push('- 暂无快照（打开一次「小号生态」面板即可采集）')
-    }
-    L.push('')
-    L.push('## 二、今日行为')
-    const actParts = []
-    if (counts.archive) actParts.push(`三连 ${counts.archive}`)
-    if (counts.like) actParts.push(`喜欢 ${counts.like}`)
-    if (counts.fav) actParts.push(`收藏 ${counts.fav}`)
-    if (counts.share) actParts.push(`转发 ${counts.share}`)
-    if (counts.danmu) actParts.push(`弹幕 ${counts.danmu}`)
-    L.push(`- ${actParts.join('｜') || '无主动互动'}`)
-    L.push(`- 评论 ${commentList.length} 条（成功 ${commentList.filter(c => c.ok).length}，失败 ${commentList.filter(c => !c.ok).length}）`)
-    L.push(`- 行为事件 ${todayLogs.length} 条`)
-    L.push('')
-    L.push('## 三、Token')
-    L.push(`- 今日消耗：${tokenToday} / 预算 ${budget}（${budget ? Math.round(tokenToday / budget * 100) : 0}%）`)
-    L.push('')
-    L.push('## 四、评论明细（最近 10 条）')
-    if (commentList.length) {
-      for (const c of commentList.slice(-10)) {
-        L.push(`- ${c.time} ${c.bv ? `https://www.bilibili.com/video/${c.bv}` : '-'}　${c.note}${c.ok ? '' : '（失败）'}`)
-      }
-    } else {
-      L.push('- 无')
-    }
-    L.push('')
-    L.push('## 五、异常与失败')
-    if (failList.length) {
-      for (const f of failList.slice(-10)) L.push(`- ${f.time} ${f.tool} ${f.target} ${f.note}`)
-    } else {
-      L.push('- 无')
-    }
-    L.push('')
-    L.push('## 六、待补充（人工）')
-    L.push('- 今天最大的意外：')
-    L.push('- 踩到的坑：')
-    L.push('- 明天要验证的：')
-
-    return send(res, 200, JSON.stringify({ ok: true, date: today, dayNo, text: L.join('\n') }))
-  }
   if (pathname === '/api/bili-stats' && req.method === 'GET') {
-    const H = biliReqHeaders()
-    if (!H) return send(res, 200, JSON.stringify({ ok: false, error: 'Cookie 未配置' }))
-    let nav = null, stat = { following: 0, follower: 0 }, likes = 0, atCount = 0, replyCount = 0, likeReplyCount = 0
-    try {
-      const r = await fetch('https://api.bilibili.com/x/web-interface/nav', { headers: H })
-      const j = await r.json()
-      if (j?.code === 0) nav = j.data
-    } catch {}
-    if (nav?.mid) {
+    const creds = getJson('credentials.json')
+    const cfg = getJson('config.json')
+    const ownerMid = cfg.bili?.ownerMid
+    const ownerName = cfg.bili?.ownerName || '主人'
+    const selfMid = cfg.bili?.selfMid
+    const sess = creds.sessdata
+    const jct = creds.bili_jct || creds.biliJct
+
+    async function fetchStats(mid, useCookie) {
+      const H = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': `https://space.bilibili.com/${mid}`,
+      }
+      if (useCookie && sess && jct) {
+        H.Cookie = `SESSDATA=${sess}; bili_jct=${jct}${creds.buvid3 ? '; buvid3=' + creds.buvid3 : ''}`
+      }
+      let following = 0, follower = 0, likes = 0
       try {
-        const r = await fetch(`https://api.bilibili.com/x/relation/stat?vmid=${nav.mid}`, { headers: H })
+        const r = await fetch(`https://api.bilibili.com/x/relation/stat?vmid=${mid}`, { headers: H })
         const j = await r.json()
-        if (j?.code === 0) stat = { following: j.data?.following ?? 0, follower: j.data?.follower ?? 0 }
+        if (j?.code === 0) { following = j.data?.following ?? 0; follower = j.data?.follower ?? 0 }
       } catch {}
       try {
-        const r = await fetch(`https://api.bilibili.com/x/space/upstat?mid=${nav.mid}`, { headers: H })
+        const r = await fetch(`https://api.bilibili.com/x/space/upstat?mid=${mid}`, { headers: H })
         const j = await r.json()
         if (j?.code === 0) likes = j.data?.likes ?? 0
       } catch {}
+      return { following, follower, likes }
     }
-    try {
-      const r = await fetch('https://api.bilibili.com/x/msgfeed/unread?build=0&mobi_app=web', { headers: H })
-      const j = await r.json()
-      if (j?.code === 0) {
-        atCount = j.data?.at ?? 0
-        replyCount = j.data?.reply ?? 0
-        likeReplyCount = j.data?.liked_reply ?? 0
+
+    let selfData = { following: 0, follower: 0, likes: 0 }
+    let ownerData = { following: 0, follower: 0, likes: 0 }
+    let selfNav = null
+    let atCount = 0, replyCount = 0, likeReplyCount = 0
+
+    if (selfMid) selfData = await fetchStats(selfMid, true)
+    if (ownerMid && String(ownerMid) !== String(selfMid)) ownerData = await fetchStats(ownerMid, false)
+
+    if (sess && jct) {
+      const Hnav = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.bilibili.com/',
+        'Cookie': `SESSDATA=${sess}; bili_jct=${jct}${creds.buvid3 ? '; buvid3=' + creds.buvid3 : ''}`,
       }
-    } catch {}
-    if (nav?.mid) snapshotStats({ following: stat.following, follower: stat.follower, likes, level: nav?.level_info?.current_level })
+      try {
+        const r = await fetch('https://api.bilibili.com/x/web-interface/nav', { headers: Hnav })
+        const j = await r.json()
+        if (j?.code === 0) selfNav = j.data
+      } catch {}
+      try {
+        const r = await fetch('https://api.bilibili.com/x/msgfeed/unread?build=0&mobi_app=web', { headers: Hnav })
+        const j = await r.json()
+        if (j?.code === 0) {
+          atCount = j.data?.at ?? 0
+          replyCount = j.data?.reply ?? 0
+          likeReplyCount = j.data?.liked_reply ?? 0
+        }
+      } catch {}
+    }
+
+    saveStatsSnapshot({ self: selfData, owner: ownerData, selfMid, ownerMid, ownerName })
+
     return send(res, 200, JSON.stringify({
-      ok: !!nav,
-      mid: nav?.mid,
-      uname: nav?.uname,
-      stat: { following: stat.following, follower: stat.follower, likes },
-      vipStatus: nav?.vipStatus,
-      levelInfo: nav?.level_info,
-      unread: { at: atCount, reply: replyCount, likeReply: likeReplyCount },
+      ok: !!selfNav || !!selfMid,
+      cookieLogin: !!selfNav?.isLogin,
+      cookieInfo: sess && jct ? {
+        hasSess: !!sess,
+        hasJct: !!jct,
+        hasBuvid3: !!creds.buvid3,
+        isLogin: !!selfNav?.isLogin,
+        expireTs: selfNav?.expire_info || null,
+      } : null,
+      owner: { mid: ownerMid, name: ownerName, ...ownerData },
+      self: { mid: selfMid, name: selfNav?.uname || cfg.bili?.selfName || '豆包分身', ...selfData, unread: { at: atCount, reply: replyCount, likeReply: likeReplyCount } },
     }))
+  }
+  if (pathname === '/api/stats-history' && req.method === 'GET') {
+    const dir = resolveDataDir()
+    const f = path.join(dir, 'stats-history.json')
+    let data = []
+    try { data = JSON.parse(fs.readFileSync(f, 'utf8')) } catch {}
+    return send(res, 200, JSON.stringify({ ok: true, data }))
   }
   if (pathname === '/api/bili/unfollow' && req.method === 'POST') {
     const body = await parseBody(req)

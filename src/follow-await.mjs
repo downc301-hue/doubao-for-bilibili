@@ -218,14 +218,10 @@ function pickFallbackTemplate() {
 }
 
 async function runArchiveActions(video) {
-  if (video.type === 'article') {
-    console.log(`   [archiver] article cv${video.articleId} (专栏三连API待补，暂跳过)`)
-    return
-  }
   const flag = DRY_RUN ? '--dry' : '--go'
   const scriptsDir = path.join(process.cwd(), 'tools', 'commands')
-  const runTool = (name) => new Promise((resolve) => {
-    const proc = spawn(process.execPath, [path.join(scriptsDir, name + '.mjs'), '--aid', String(video.aid), '--bvid', video.bvid, flag], {
+  const runTool = (name, toolArgs) => new Promise((resolve) => {
+    const proc = spawn(process.execPath, [path.join(scriptsDir, name + '.mjs'), ...toolArgs], {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: process.cwd(),
       env: spawnEnv(),
@@ -236,15 +232,31 @@ async function runArchiveActions(video) {
     proc.on('close', (code) => resolve({ code, out }))
   })
 
+  if (video.type === 'article') {
+    console.log(`   [archiver] 专栏 cv${video.articleId} 点赞 (${DRY_RUN ? 'DRY' : 'REAL'})`)
+    const rLike = await runTool('like-article', ['--cv', String(video.articleId), flag])
+    const ok = rLike.out.includes('成功')
+    console.log(`   ${ok ? '[OK]' : rLike.out.includes('重复') || rLike.out.includes('65006') ? '[SKIP]' : '[FAIL]'} like`)
+    writeWhaleLog({
+      kind: 'tool_call',
+      tool: 'like',
+      note: `专栏点赞 ${video.upName || ''} ${video.title || ''}`.slice(0, 80),
+      target: 'cv' + video.articleId,
+      success: ok,
+    })
+    await new Promise(s => setTimeout(s, 1500))
+    return
+  }
+
   console.log(`   [archiver] B号三连 (like+fav+share, ${DRY_RUN ? 'DRY' : 'REAL'})`)
 
-  const rLike = await runTool('like-archive')
+  const rLike = await runTool('like-archive', ['--aid', String(video.aid), '--bvid', video.bvid, flag])
   console.log(`   ${rLike.out.includes('成功') ? '[OK]' : rLike.out.includes('重复') ? '[SKIP]' : '[FAIL]'} like`)
 
-  const rFav = await runTool('fav')
+  const rFav = await runTool('fav', ['--aid', String(video.aid), '--bvid', video.bvid, flag])
   console.log(`   ${rFav.out.includes('成功') ? '[OK]' : rFav.out.includes('默认') ? '[DIR]' : '[FAIL]'} fav`)
 
-  const rShare = await runTool('share')
+  const rShare = await runTool('share', ['--aid', String(video.aid), '--bvid', video.bvid, flag])
   console.log(`   ${rShare.out.includes('成功') || rShare.out.includes('已') ? '[OK]' : rShare.out.includes('重复') ? '[SKIP]' : '[FAIL]'} share`)
 
   const allOk = rLike.out.includes('成功') && rShare.out.includes('成功')

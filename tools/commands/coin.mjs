@@ -1,5 +1,4 @@
-import fs from 'node:fs'
-import path from 'node:path'
+import { loadCreds } from '../lib/creds.mjs'
 
 const args = new Map()
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -18,8 +17,7 @@ if (dry && go) { console.error('pick either --dry or --go'); process.exit(2) }
 if (!dry && !go) { console.error('refusing to run without --dry or --go'); process.exit(2) }
 if (multiply < 1 || multiply > 2) { console.error('--multiply must be 1 or 2'); process.exit(2) }
 
-const credPath = path.join((process.env.USERPROFILE || process.env.HOME || '/'), '.bili-ai', 'credentials.json')
-const cred = JSON.parse(fs.readFileSync(credPath, 'utf8'))
+const cred = loadCreds()
 const cookieHeader = `SESSDATA=${cred.sessdata}; bili_jct=${cred.bili_jct}; buvid3=${cred.buvid3}`
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 const referer = `https://www.bilibili.com/video/${bvid}/`

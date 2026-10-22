@@ -47,9 +47,22 @@ function todayStr() { return new Date().toLocaleDateString('sv-SE') }
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
+async function fetchWithTimeout(url, opts = {}, timeout = 15000) {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), timeout)
+  try {
+    const res = await fetch(url, { ...opts, signal: ctrl.signal })
+    clearTimeout(t)
+    return res
+  } catch (e) {
+    clearTimeout(t)
+    throw e
+  }
+}
+
 async function main() {
   console.log('=== 登录态 ===')
-  const navR = await fetch('https://api.bilibili.com/x/web-interface/nav', { headers: HC })
+  const navR = await fetchWithTimeout('https://api.bilibili.com/x/web-interface/nav', { headers: HC })
   const navJ = await navR.json()
   console.log('  B号:', navJ.data?.uname, '(mid', navJ.data?.mid, ') 硬币:', navJ.data?.money)
 
@@ -63,7 +76,7 @@ async function main() {
   console.log('\n=== Step 2: 拉B号已有关注 ===')
   const mineSet = new Set()
   for (let p = 1; p <= 5; p++) {
-    const rMine = await fetch(`https://api.bilibili.com/x/relation/followings?vmid=${SELF_MID}&pn=${p}&ps=50&order=desc`, { headers: HC })
+    const rMine = await fetchWithTimeout(`https://api.bilibili.com/x/relation/followings?vmid=${SELF_MID}&pn=${p}&ps=50&order=desc`, { headers: HC })
     const mineJ = await rMine.json()
     const list = mineJ.data?.list || []
     if (!list.length) break
@@ -123,7 +136,7 @@ async function main() {
       j = { code: 0 }
     } else {
       try {
-        const r = await fetch('https://api.bilibili.com/x/relation/modify', { method: 'POST', headers: HP, body })
+        const r = await fetchWithTimeout('https://api.bilibili.com/x/relation/modify', { method: 'POST', headers: HP, body })
         j = await r.json()
       } catch (e) {
         j = { code: -999, message: e.message }

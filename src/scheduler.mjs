@@ -131,6 +131,28 @@ export function markFail(taskId, err) {
 }
 
 export function runTask(task) {
+  if (task.type === 'script') {
+    const scriptPath = path.isAbsolute(task.script) ? task.script : path.join(process.cwd(), task.script || '')
+    const args = String(task.args || '').split(/\s+/).filter(Boolean)
+    console.log(`📜 执行脚本任务: ${task.name} → ${scriptPath} ${args.join(' ')}`)
+    return new Promise((resolve) => {
+      const proc = spawn(process.execPath, [scriptPath, ...args], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: process.cwd(),
+        env: spawnEnv(),
+      })
+      let out = '', err = ''
+      proc.stdout.on('data', d => { out += d.toString(); process.stdout.write(`[script ${task.name}] ${d}`) })
+      proc.stderr.on('data', d => { err += d.toString(); process.stderr.write(`[script ${task.name}] ERR ${d}`) })
+      proc.on('close', (code) => {
+        if (code === 0) markDone(task.id || task.name)
+        else markFail(task.id || task.name, err || `exit code ${code}`)
+        resolve({ code, out, err, mode: 'script' })
+      })
+      proc.on('error', (e) => { markFail(task.id || task.name, e.message); resolve({ code: -1, err: e.message }) })
+    })
+  }
+
   const hasTemplate = !!(task.template && String(task.template).trim())
   const mode = hasTemplate ? 'direct' : 'agent'
   const script = path.join(process.cwd(), 'src', hasTemplate ? 'run-task-direct.mjs' : 'run-task.mjs')

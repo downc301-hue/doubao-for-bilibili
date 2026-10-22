@@ -1,8 +1,8 @@
 @font-face {
   font-family: "iconfont"; /* Project id 5245637 */
-  src: url('iconfont.woff2?t=1792562656682') format('woff2'),
-       url('iconfont.woff?t=1792562656682') format('woff'),
-       url('iconfont.ttf?t=1792562656682') format('truetype');
+  src: url('iconfont.woff2?t=1792626367065') format('woff2'),
+       url('iconfont.woff?t=1792626367065') format('woff'),
+       url('iconfont.ttf?t=1792626367065') format('truetype');
 }
 
 .iconfont {
@@ -14,7 +14,7 @@
 }
 
 .icon-doubao:before {
-  content: "\e70b";
+  content: "\e601";
 }
 
 .icon-diary:before {
@@ -30,7 +30,7 @@
 }
 
 .icon-done:before {
-  content: "\e60a";
+  content: "\e606";
 }
 
 .icon-sun:before {

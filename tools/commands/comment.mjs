@@ -12,7 +12,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { config } from '../lib/config.mjs'
 
@@ -47,9 +47,11 @@ async function parentAuthor(aid, rootRpid, parentRpid) {
 }
 const quota = (args) => {
   try {
-    return { code: 0, out: execFileSync(process.execPath,
-      [path.join(path.dirname(fileURLToPath(import.meta.url)), 'quota.mjs'), ...args], { encoding: 'utf8' }).trim() }
-  } catch (e) { return { code: e.status ?? 1, out: String(e.stdout ?? e.message).trim() } }
+    const r = spawnSync(process.execPath,
+      [path.join(path.dirname(fileURLToPath(import.meta.url)), 'quota.mjs'), ...args], { encoding: 'utf8', timeout: 8000 })
+    if (r.error) throw r.error
+    return { code: r.status ?? 1, out: (r.stdout || '').trim() }
+  } catch (e) { return { code: 1, out: String(e.message).trim() } }
 }
 
 const args = new Map()
@@ -146,11 +148,15 @@ if (ONCE) {
   }
 }
 
-const credPath = path.join((process.env.USERPROFILE || process.env.HOME || '/'), '.bili-ai', 'credentials.json')
-if (!fs.existsSync(credPath)) {
-  console.error(`credentials file missing: ${credPath}`)
+let credPath = ''
+for (const dir of ['.doubao-bot', '.bili-ai']) {
+  const p = path.join((process.env.USERPROFILE || process.env.HOME || '/'), dir, 'credentials.json')
+  if (fs.existsSync(p)) { credPath = p; break }
+}
+if (!credPath) {
+  console.error(`credentials file missing in both .doubao-bot and .bili-ai`)
   console.error('create it with {"sessdata":"...","bili_jct":"...","buvid3":"..."}')
-  process.exit(3)
+  process.exit(1)
 }
 const cred = JSON.parse(fs.readFileSync(credPath, 'utf8'))
 const missing = ['sessdata', 'bili_jct', 'buvid3'].filter((k) => !cred[k] || String(cred[k]).trim() === '')
@@ -277,7 +283,7 @@ if (out.code === 0) {
   if (AUTO || SHARE) {
     try {
       const msg = `[${SHARE ? '分享型·@主人' : '自主发言'}] 评论已发出 rpid=${rpid}\n目标：${bvid ? 'BV:' + bvid : 'oid:' + oid}\n内容：${message.slice(0, 80)}`
-      execFileSync(process.execPath,
+      spawnSync(process.execPath,
         [path.join(path.dirname(fileURLToPath(import.meta.url)), 'notify.mjs'), msg, '--title', SHARE ? '分享评论报备' : '自主发言报备'],
         { stdio: 'inherit' })
     } catch (e) {

@@ -36,6 +36,7 @@ const map = {
   'dm-await': ['commands/dm-await.mjs', '私信监听（只认主人；命中打印 DM_HIT）'],
   dm: ['commands/dm.mjs', '私信（专属通道）：一天 1 条 · 只发主人 · 必须互关（都写死）'],
   comment: ['commands/comment.mjs', '发一条视频评论；带 --root/--parent 就是二级回复'],
+  'like-article': ['commands/like-article.mjs', '专栏（图文）点赞：--cv <专栏号> [--dry | --go]'],
   'reply-draft': ['commands/reply-draft.mjs', '待审回复（B 档：发前审核）：add 进队列 / list / drop / take'],
   'comment-del': ['commands/comment-del.mjs', '删除自己发的一条评论（x/v2/reply/del，只能删自己的）'],
   dynamic: ['commands/dynamic.mjs', '动态：post / rm / check'],
